@@ -88,6 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 Self.runMobiusDataMigration()
             case .accountStateCreation:
                 accounts = AccountsState()
+                // 토글 꺼짐이면 여기서 끝 — 타이머도 로그 스캔도 네트워크도 생기지 않는다.
+                if MobiusFeature.isEnabled { accounts.start() }
             }
         }
         LoginItem.migrateFromLegacyLoginItemIfNeeded()   // 로그인아이템 → KeepAlive 에이전트(크래시 자동 재실행)
