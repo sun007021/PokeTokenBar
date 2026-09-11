@@ -45,6 +45,9 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
    Mobius 데이터는 **하위 디렉터리** `mobius/` 에만 쓴다.
 3. 새 UserDefaults 키는 `mobius.` 접두사를 붙인다 (상류 키와의 충돌 및 rebase 충돌 예방).
    통합 시점 기준 양쪽 키 충돌은 0개였다 — 접두사는 미래 충돌 예방용이다.
+4. **앱 시작 순서**: `migrateLegacyStorageIfNeeded()` → `MobiusDataMigration.migrateIfNeeded()` →
+   `AccountsState` 생성. 세 단계가 모두 "대상이 이미 있으면 건너뛴다"로 게이트되므로 뒤가 먼저
+   돌면 앞이 영영 안 돈다 — 아래 '앱 시작 순서' 절.
 
 ## 이식 규칙 (Mobius 가 실패로 배운 것 — 재현 금지)
 
@@ -90,11 +93,49 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
 - [ ] **Phase 4 — 계정 탭**: `PopoverTab.accounts`, 360pt 카드 리스트 재작성
 - [ ] **Phase 5 — 설정 섹션**: 자동 전환(Claude/Codex) · 계정 추가 · 게이지 · 미리 전환 · 알림
 - [ ] **Phase 6 — 안전장치**: 이중 writer 가드(`dev.chussum.mobius` 실행 감지), 전환 시
-      `OAuthAccessTokenCache.shared.invalidate()`, 디스플레이 슬립 시 틱 정지
+      `OAuthAccessTokenCache.shared.invalidate()`, 슬립 시 틱 정지
+      (★ **디스플레이** 슬립은 신호로 쓰지 않기로 했다 — Phase 3b 판단. 메뉴바 애니메이션과 달리
+      자동 전환은 정확성 기능이라, 화면만 꺼진 채 `claude`/`codex` 세션이 계속 도는 흔한 상황에서
+      틱을 멈추면 소진돼도 전환이 안 되고 사용자는 막힌 CLI 로 돌아온다. 쓴다면 **시스템** 슬립
+      (`NSWorkspace.willSleepNotification`/`didWakeNotification`)이어야 하고, 깨어날 때 즉시 1틱을
+      돌리는 경로가 함께 필요하다)
 - [ ] **Phase 7 — 다국어**: 약 115개 문자열 × 7개 언어. `L` 구조체 방식(lproj·`Bundle.module` 금지).
       이관 대상은 `Sources/PokeTokenBar/Mobius/MobiusStrings.swift` 의 `loc(_:)`/`loc(_:_:)` —
       Phase 3 이 만든 임시 경유지로, 지금은 키(한국어 원문)를 그대로 돌려준다
 - [ ] **Phase 8 — 게이트·빌드**: `test-gate.sh` 화이트리스트 갱신, 고정 서명 인증서, `/Applications` 설치
+
+## 앱 시작 순서 (`MobiusLaunchSequence`)
+
+`AppDelegate.applicationDidFinishLaunching` 은 Mobius 초기화를 하드코딩된 호출 줄이 아니라
+`MobiusLaunchSequence.run { … }` 로 돈다. 순서가 **한 곳**(`MobiusLaunchSequence.order`)에만
+적혀 있어야 테스트가 프로덕션 경로까지 같이 고정할 수 있기 때문이다.
+
+| 순서 | 단계 | 먼저 돌면 잃는 것 |
+|---|---|---|
+| 1 | `legacyStorageRename` (`TokenMac` → `PokeTokenBar`) | `!fileExists(new)` 게이트 — 누가 먼저 `AppStatePaths.directory()` 를 부르면(호출만으로 디렉터리가 **생긴다**) TokenMac 시절 도감·토큰이 영영 이전 안 됨 |
+| 2 | `mobiusDataMigration` (`…/Mobius` → `PokeTokenBar/mobius`) | `alreadyMigrated` 판정이 **대상 디렉터리 존재** — `AccountStore` 가 먼저 저장해 `mobius/` 를 만들면 기존 Mobius.app 계정·비밀 스냅샷이 영영 이전 안 됨 |
+| 3 | `accountStateCreation` (`AccountsState` + 조건부 `start()`) | — |
+
+`Tests/PokeTokenBarTests/MobiusLaunchSequenceTests.swift` 가 각 순서를 **실제 파일 연산으로
+재생**해 데이터가 실제로 넘어왔는지 본다(순서 단언만으로는 "왜 그 순서인지"를 증명 못 한다).
+프로덕션 함수 셋(`AppDelegate.migrateLegacyStorageIfNeeded(base:)`,
+`MobiusDataMigration.migrateIfNeeded(source:)`, `AppStatePaths.directory()`)을 `PTB_STATE_DIR`
+로 임시 디렉터리에 격리해 그대로 호출한다 — 그 함수들의 `base`/`source` 파라미터는 **테스트
+주입 전용**이고, 함정 당사자인 대상 경로 유도는 일부러 주입하지 않는다.
+
+마이그레이션 실패는 **앱 시작을 막지 않는다** — 계정 전환은 부가 기능인데 거기서 던지면 포켓몬
+앱 전체가 못 뜬다. `AppLog` 에 남기고 계속 진행하며, 실패하면 대상 디렉터리가 안 만들어지므로
+다음 실행에서 자연히 재시도된다.
+
+## 기능 토글 `mobius.enabled` (기본 꺼짐)
+
+`MobiusFeature.isEnabled` 가 꺼져 있으면 `AccountsState.start()` 를 부르지 않는다. `start()` 가
+타이머(3초 틱)·세션 로그 스캔·Keychain 워밍업·알림 권한 요청·`DistributedNotificationCenter`
+옵저버의 **유일한** 진입점이므로, 꺼진 상태의 런타임 동작은 기능을 넣기 전과 같다. 객체는
+생성되지만 `AccountStore.init` 은 디스크를 읽기만 하고 아무 디렉터리도 만들지 않는다.
+
+수동 확인: `defaults write io.github.chattymin.poketokenbar mobius.enabled -bool YES`.
+토글 UI 는 Phase 5.
 
 ## 상태 계층을 `ObservableObject` 로 두는 이유
 
