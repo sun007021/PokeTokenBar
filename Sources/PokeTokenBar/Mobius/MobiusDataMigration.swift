@@ -119,12 +119,22 @@ enum MobiusDataMigration {
         return .migrated(fileCount: fileCount)
     }
 
-    /// Thin real-path wrapper — not called from anywhere yet. Wiring this into the app lifecycle
-    /// is Phase 3; for now only the code and its tests exist, so runtime behavior is unchanged.
-    /// 독립 Mobius.app 의 기본 데이터 위치.
-    static var defaultSource: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Mobius")
+    /// 독립 Mobius.app 의 기본 데이터 위치. 홈 디렉터리는 `MobiusEnvironment.live()` 와 **같은
+    /// 규칙**으로 고른다 — `MOBIUS_HOME` 이 있으면 그 홈, 없으면 실제 홈.
+    ///
+    /// ★ 이 변수를 여기서도 존중해야 격리 실행이 성립한다. 원본 경로만 실제 홈에 하드코딩돼
+    /// 있으면, `MOBIUS_HOME` 을 임시 디렉터리로 돌려 앱을 띄워도 **실제 사용자의 계정 프로필과
+    /// 자격증명 스냅샷이 그 임시 트리로 복사된다**(실측으로 확인된 동작).
+    static func defaultSource(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        let home: URL
+        if let override = environment["MOBIUS_HOME"] {
+            home = URL(fileURLWithPath: override)
+        } else {
+            home = FileManager.default.homeDirectoryForCurrentUser
+        }
+        return home.appendingPathComponent("Library/Application Support/Mobius")
     }
 
     /// ★ `source` 는 **테스트 주입 전용**이다 — 실제 `~/Library/Application Support/Mobius` 에
@@ -135,7 +145,8 @@ enum MobiusDataMigration {
         source: URL? = nil, fileManager: FileManager = .default
     ) throws -> Outcome {
         let destination = AppStatePaths.directory().appendingPathComponent("mobius")
-        return try migrate(from: source ?? defaultSource, to: destination, fileManager: fileManager)
+        return try migrate(
+            from: source ?? defaultSource(), to: destination, fileManager: fileManager)
     }
 
     /// Recursively copies `source` to `destination`, mirroring the source's POSIX permissions on

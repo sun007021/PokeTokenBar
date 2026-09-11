@@ -188,4 +188,39 @@ final class MobiusDataMigrationTests: XCTestCase {
             at: destination.deletingLastPathComponent(), includingPropertiesForKeys: nil)
         XCTAssertEqual(leftovers.map(\.lastPathComponent), ["mobius"])
     }
+
+    // MARK: - Source location
+
+    /// `MOBIUS_HOME` is how the whole engine gets pointed at a scratch home (`MobiusEnvironment
+    /// .live()`). The migration source has to follow it, or launching the app with an isolated
+    /// state directory still copies the real user's credential snapshots out of the real home.
+    func testDefaultSourceFollowsMobiusHome() {
+        let scratch = root.appendingPathComponent("scratch-home")
+
+        let resolved = MobiusDataMigration.defaultSource(environment: ["MOBIUS_HOME": scratch.path])
+
+        XCTAssertEqual(
+            resolved.standardizedFileURL,
+            scratch.appendingPathComponent("Library/Application Support/Mobius").standardizedFileURL)
+    }
+
+    func testDefaultSourceFallsBackToTheRealHomeWithoutMobiusHome() {
+        let resolved = MobiusDataMigration.defaultSource(environment: [:])
+
+        XCTAssertEqual(
+            resolved.standardizedFileURL,
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/Mobius").standardizedFileURL)
+    }
+
+    /// The whole point of the override: with `MOBIUS_HOME` set, nothing outside that home is read.
+    func testDefaultSourceUnderMobiusHomeDoesNotPointAtTheRealHome() {
+        let scratch = root.appendingPathComponent("scratch-home")
+
+        let resolved = MobiusDataMigration.defaultSource(environment: ["MOBIUS_HOME": scratch.path])
+
+        XCTAssertFalse(
+            resolved.path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path + "/"),
+            "the migration source must not fall inside the real home when MOBIUS_HOME is set")
+    }
 }
