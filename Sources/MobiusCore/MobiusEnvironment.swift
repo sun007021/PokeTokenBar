@@ -6,11 +6,16 @@ public struct MobiusEnvironment: Sendable {
     public var localUser: String
     /// codex CLI 설정 루트 오버라이드 (codex 자신의 CODEX_HOME과 동일 의미). nil이면 ~/.codex.
     public var codexHome: URL?
+    /// Mobius 상태 디렉터리(accounts.json/secrets/desktop-profiles) 오버라이드. nil이면
+    /// `home/Library/Application Support/Mobius` (기존 동작과 동일). PokeTokenBar 통합처럼
+    /// 호스트 앱의 상태 디렉터리 하위(예: `.../PokeTokenBar/mobius`)에 격리하고 싶을 때 주입한다.
+    public var appSupportDirOverride: URL?
 
-    public init(home: URL, localUser: String, codexHome: URL? = nil) {
+    public init(home: URL, localUser: String, codexHome: URL? = nil, appSupportDirOverride: URL? = nil) {
         self.home = home
         self.localUser = localUser
         self.codexHome = codexHome
+        self.appSupportDirOverride = appSupportDirOverride
     }
 
     public var claudeDir: URL { home.appendingPathComponent(".claude") }
@@ -18,7 +23,7 @@ public struct MobiusEnvironment: Sendable {
     public var credentialsFile: URL { claudeDir.appendingPathComponent(".credentials.json") }
     public var projectsDir: URL { claudeDir.appendingPathComponent("projects") }
     public var appSupportDir: URL {
-        home.appendingPathComponent("Library/Application Support/Mobius")
+        appSupportDirOverride ?? home.appendingPathComponent("Library/Application Support/Mobius")
     }
     public var accountsFile: URL { appSupportDir.appendingPathComponent("accounts.json") }
     /// 계정별 자격증명 스냅샷 보관소(0700). Claude Code 자신도 토큰을 .credentials.json(0600)에
