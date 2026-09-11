@@ -138,6 +138,47 @@ final class MobiusDataMigrationTests: XCTestCase {
             Data("identity".utf8))
     }
 
+    func testEmptySourceDirectoryDoesNotThrowOnRerun() throws {
+        // Simulates a user who installed/ran Mobius.app but never added an account: the state
+        // directory exists (Mobius created it on first launch) but holds none of accounts.json,
+        // secrets/, or desktop-profiles/. The old `alreadyMigrated` guard was keyed off
+        // `destination/accounts.json`, so if the first run still created `destination` (even
+        // empty), the second run's guard never tripped and `moveItem` threw because
+        // `destination` already existed.
+        try fm.createDirectory(at: source, withIntermediateDirectories: true)
+
+        let firstOutcome = try MobiusDataMigration.migrate(from: source, to: destination, fileManager: fm)
+        XCTAssertEqual(firstOutcome, .nothingToMigrate)
+        XCTAssertFalse(fm.fileExists(atPath: destination.path), "nothing to migrate must not create destination")
+
+        let secondOutcome = try MobiusDataMigration.migrate(from: source, to: destination, fileManager: fm)
+        XCTAssertEqual(secondOutcome, .nothingToMigrate, "repeated runs against an untouched empty source stay idempotent")
+    }
+
+    func testSourceWithOnlySecretsAndNoAccountsFileDoesNotThrowOnRerun() throws {
+        // Simulates a crash between `AccountStore.upsertProfile` writing the secret snapshot
+        // and its subsequent `save()` writing accounts.json (see AccountStore.swift — secret
+        // write happens before `save()`): `secrets/` holds a file but `accounts.json` was never
+        // written. The old `alreadyMigrated` guard only ever looked at
+        // `destination/accounts.json`, so a first run here would migrate `secrets/` into a
+        // freshly created `destination` that still has no `accounts.json` in it — and every
+        // later run would try (and fail) to migrate again since the guard never tripped.
+        try fm.createDirectory(at: source, withIntermediateDirectories: true)
+        let secrets = source.appendingPathComponent("secrets")
+        try fm.createDirectory(at: secrets, withIntermediateDirectories: true,
+                                attributes: [.posixPermissions: 0o700])
+        try Data("orphaned-secret".utf8).write(to: secrets.appendingPathComponent("a.json"))
+        try fm.setAttributes([.posixPermissions: 0o600],
+                              ofItemAtPath: secrets.appendingPathComponent("a.json").path)
+
+        let firstOutcome = try MobiusDataMigration.migrate(from: source, to: destination, fileManager: fm)
+        XCTAssertEqual(firstOutcome, .migrated(fileCount: 1))
+        XCTAssertFalse(fm.fileExists(atPath: destination.appendingPathComponent("accounts.json").path))
+
+        let secondOutcome = try MobiusDataMigration.migrate(from: source, to: destination, fileManager: fm)
+        XCTAssertEqual(secondOutcome, .alreadyMigrated, "a destination without accounts.json is still already migrated")
+    }
+
     func testNoStagingLeftoverAfterSuccessfulMigration() throws {
         try writeSourceFixture()
 

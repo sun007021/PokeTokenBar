@@ -14,10 +14,19 @@ enum MobiusDataMigration {
     enum Outcome: Equatable {
         /// Files were copied. `fileCount` counts files only (not directories).
         case migrated(fileCount: Int)
-        /// `destination/accounts.json` already existed — a prior run already migrated this data.
+        /// `destination` already existed — a prior run already migrated this data (or found
+        /// nothing to migrate and left `destination` alone, in which case a later run with
+        /// real data to migrate will still see `destination` absent and proceed normally).
         case alreadyMigrated
         /// `source` does not exist — the user has never run Mobius.app, not an error.
         case noSourceData
+        /// `source` exists but held none of accounts.json / secrets/ / desktop-profiles — e.g.
+        /// Mobius.app was installed and launched but the user never added an account, or a
+        /// crash left a fresh Mobius state directory with no data in it yet. Nothing was
+        /// copied and `destination` was deliberately left uncreated (see `migrate` below), so
+        /// this is not conflated with `.migrated(fileCount: 0)`, which would claim a migration
+        /// happened when nothing actually moved.
+        case nothingToMigrate
     }
 
     /// Pure core: takes explicit source/destination URLs and a `FileManager` so it can be
@@ -41,14 +50,19 @@ enum MobiusDataMigration {
             return .noSourceData
         }
 
-        let accountsAtDestination = destination.appendingPathComponent("accounts.json")
-        if fileManager.fileExists(atPath: accountsAtDestination.path) {
+        // `destination` is only ever created below when there was at least one file to move
+        // (see the `fileCount > 0` guard before `moveItem`), so its mere existence — not
+        // specifically `destination/accounts.json` — is what "already migrated" means. Keying
+        // this off `accounts.json` alone let a `destination` that existed without it (an empty
+        // migration, or a source whose secrets/ was staged without an accounts.json — e.g. a
+        // crash between AccountStore writing a secret and saving accounts.json) slip past this
+        // guard, so the next run tried to `moveItem` into a `destination` that was already
+        // there and threw "already exists" on every subsequent launch.
+        if fileManager.fileExists(atPath: destination.path) {
             return .alreadyMigrated
         }
 
         let destinationParent = destination.deletingLastPathComponent()
-        try fileManager.createDirectory(at: destinationParent, withIntermediateDirectories: true)
-
         let staging = destinationParent.appendingPathComponent(".mobius-migration-\(UUID().uuidString)")
         defer { try? fileManager.removeItem(at: staging) }
         try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
@@ -92,6 +106,13 @@ enum MobiusDataMigration {
                 from: desktopProfilesSource,
                 to: staging.appendingPathComponent("desktop-profiles"),
                 fileManager: fileManager)
+        }
+
+        guard fileCount > 0 else {
+            // Nothing was staged (source exists but is empty of anything this migration
+            // understands) — leave `destination` uncreated. `staging` is removed by the
+            // `defer` above; there is nothing to move.
+            return .nothingToMigrate
         }
 
         try fileManager.moveItem(at: staging, to: destination)
