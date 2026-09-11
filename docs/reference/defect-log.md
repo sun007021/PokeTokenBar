@@ -683,6 +683,28 @@ read_when:
   분리한 **순수 함수**(`UsageStore.evaluateLimitAlerts`)로 테스트한다 — 번들 가드 때문에 실 발화 경로는
   xctest 에서 조기 return 되어 커버 불가였던 게 무테스트의 원인.
 
+- **번들을 요구하는 API 는 `AppEnv.isBundledApp` 뒤에 둔다 — 없으면 raw 바이너리 실행이 시작 즉시 죽는다.**
+  `UNUserNotificationCenter.current()` 는 번들 프로세스가 아니면 `NSInternalInconsistencyException`
+  (`bundleProxyForCurrentProcess is nil`)을 **던진다**. 실패 모드가 "알림이 안 간다"가 아니라
+  **프로세스 사망**이라 게이트는 취향이 아니라 필수다. PTB 는 이미 `UsageStore`·`CompanionStore`·
+  `AppLog` 에서 이 규율을 지키고 있었는데, 이식한 Mobius 코드(`AccountsState.start()` 의 권한 요청,
+  `AccountsState.notify()`)가 따르지 않아 `-mobius.enabled YES ./.build/debug/PokeTokenBar` 가
+  메뉴바 아이콘이 뜨기 전에 죽었다. **왜 1,368개 테스트가 못 잡았나:** 테스트도 번들이 아니므로
+  조건은 매 실행 성립해 있었는데, **아무 테스트도 그 함수를 부르지 않았다** — `AccountsState` 를
+  건드리는 유일한 테스트(`MobiusLaunchSequenceTests`)가 `accountStateCreation` 단계를 실제 호출이
+  아니라 **파일 연산으로 대역 재생**해서다(순서 계약을 보기엔 옳지만 생성자·`start()` 본문은 한 줄도
+  안 돈다). 커버리지도 증거가 아니었다 — 해당 줄은 line coverage 상 `^0` 이다.
+  **회귀 가드는 "가드가 있나"가 아니라 진짜 트리거를 밟는다**(`MobiusBundleGuardTests`):
+  `swift test` 자체가 번들이 아니므로 합성 `MobiusEnvironment`(임시 home + keychain 에 없는
+  `localUser`)로 `AccountsState` 를 만들어 `start()` 와 `notify()` 를 그대로 부른다 — 가드를 지우면
+  실제로 `AccountsState.swift:320` 에서 예외가 나며 빨간불(확인함). 소스 스캔 1건
+  (`testEveryNotificationCenterUseInMobiusSourcesIsGuarded`)이 **앞으로 추가될** 사용처까지 덮는다
+  (`Sources/PokeTokenBar/Mobius/` 의 `UNUserNotificationCenter` 줄은 같은 함수 안에 선행
+  `AppEnv.isBundledApp` 이 있어야 한다). 부류 스윕에서 함께 본 것: `LoginFlow` 의
+  `ASWebAuthenticationSession` 은 번들 밖에서도 **던지지 않고** 에러로 실패한다(실측: init 통과,
+  `start()` 가 false + `Code=2` 에러) — 도달 가능하지만 결함 트리거가 아니라 가드를 넣지 않았다.
+  `Sources/PokeTokenBar/Mobius/` 에 `Bundle.main`·`Bundle.module`·`SMAppService` 사용처는 0개다.
+
 ## 상태 파일 이전·병합
 
 - **상태 파일을 옮기거나 합칠 땐 "진행"과 "이 기기 장부"를 먼저 분류하라.** 같은 파일에 살아도 성격이

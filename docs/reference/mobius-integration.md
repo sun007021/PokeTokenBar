@@ -67,6 +67,15 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
   환경에서 UI 영구 정지(행)로 나타난 부류다.
 - **익명 로그 라인으로 계정 상태를 기록하지 않는다.** Claude 세션 로그 hit 에는 계정 식별자가 없어
   전환 직후 옛 계정의 에러가 새 계정에 박힌다 → 자동 전환이 통째로 죽는다. 판정은 usage API 로 한다.
+- **이식한 코드는 호스트 앱의 환경 가드 관례를 따른다.** PTB 는 번들이 아닐 수 있다 — raw 바이너리
+  개발 실행(`swift run` / `./.build/debug/PokeTokenBar`)과 `swift test` 가 그 경우다. 알림
+  (`UNUserNotificationCenter`)·로그인아이템(`SMAppService`)·프로덕션 로그처럼 **번들을 요구하는 API
+  는 `AppEnv.isBundledApp` 뒤에 둔다**. `UNUserNotificationCenter.current()` 는 번들이 아니면 nil 을
+  주는 게 아니라 **예외를 던져 프로세스를 죽인다** — Mobius 는 항상 `.app` 이라 이 가드가 없었고,
+  이식된 `AccountsState.start()`/`notify()` 가 그대로 넘어와 기능 토글을 켠 raw 바이너리가 시작 즉시
+  죽었다. Phase 5~8 에서 새 알림·로그인아이템 코드를 더할 때 같은 게이트를 붙일 것. 회귀 가드는
+  `Tests/PokeTokenBarTests/MobiusBundleGuardTests.swift`(진짜 트리거 호출 2건 + 소스 스캔 1건),
+  부류 전체 기록은 `docs/reference/defect-log.md` §알림.
 
 ## Phase 1 실측
 

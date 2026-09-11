@@ -313,8 +313,14 @@ final class AccountsState: ObservableObject {
     func start() {
         guard timer == nil else { return }
 
-        UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        // `.app` 번들에서만 — `UNUserNotificationCenter.current()`는 번들 프로세스가 아니면
+        // `bundleProxyForCurrentProcess is nil`로 **예외를 던져 프로세스를 죽인다**. raw 바이너리
+        // 개발 실행(`swift run`)과 `swift test`가 그 경우라, 이 줄은 호스트 앱의 나머지 알림
+        // 접근과 같은 게이트 뒤에 둔다(`UsageStore`·`CompanionStore`·`AppLog`).
+        if AppEnv.isBundledApp {
+            UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
 
         // CLI 등 외부 변경 통지 수신
         observer = DistributedNotificationCenter.default().addObserver(
@@ -1760,7 +1766,13 @@ final class AccountsState: ObservableObject {
         }
     }
 
-    private func notify(title: String, body: String) {
+    /// 계정 전환 알림(`.app` 번들일 때만). 번들이 아니면 `UNUserNotificationCenter.current()`가
+    /// 예외를 던져 프로세스를 죽이므로, 호스트 앱의 `notifyCompanionEvent`와 같은 게이트를 쓴다.
+    /// 22개 호출부가 전부 여기로 모이므로 가드는 이 한 곳이면 된다.
+    /// `private`이 아닌 이유: 회귀 테스트가 **진짜 트리거를 밟아야** 하는데(가드 유무를 단언하는
+    /// 테스트는 가드를 지워도 초록일 수 있다) `@testable import`는 `internal`까지만 닿는다.
+    func notify(title: String, body: String) {
+        guard AppEnv.isBundledApp else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
