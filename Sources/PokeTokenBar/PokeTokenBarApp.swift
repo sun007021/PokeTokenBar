@@ -566,7 +566,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func buildPopoverContent() {
         popover.contentViewController = NSHostingController(
             rootView: PopoverView()
-                .environment(store).environment(companion).environment(updater).environment(navigation))
+                .environment(store).environment(companion).environment(updater).environment(navigation)
+                // 계정 상태는 `@Observable` 이 아니라 `ObservableObject` 다(상류 이식본을 그대로
+                // 두기 위한 결정 — docs/reference/mobius-integration.md). 두 시스템은 공존한다.
+                // `MobiusLaunchSequence` 가 토글과 무관하게 **항상** 만들어 두므로(조건부인 건
+                // `start()` 뿐) 여기서 옵셔널 분기 없이 주입할 수 있고, 계정 탭 자체가 토글에
+                // 종속이라 꺼진 상태에서는 아무도 이 객체를 관찰하지 않는다.
+                .environmentObject(accounts!))
     }
 
     @objc private func togglePopover() {

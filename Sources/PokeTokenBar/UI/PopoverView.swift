@@ -1,7 +1,25 @@
 import AppKit
 import SwiftUI
 
-enum PopoverTab { case home, shop, bag, collection }
+enum PopoverTab: CaseIterable { case home, shop, bag, collection, accounts }
+
+extension PopoverTab {
+    /// 세그먼트에 실제로 나타나는 탭. 계정 탭은 `mobius.enabled` 토글에 **종속**이라 꺼져 있으면
+    /// 목록에서 통째로 빠진다 — 기본값이 꺼짐이므로 기존 사용자에게는 팝오버가 이전과 똑같다.
+    static func visible(accountsEnabled: Bool) -> [PopoverTab] {
+        allCases.filter { $0 != .accounts || accountsEnabled }
+    }
+
+    func title(_ l: L) -> String {
+        switch self {
+        case .home: return l.home
+        case .shop: return l.shop
+        case .bag: return l.bag
+        case .collection: return l.collection
+        case .accounts: return l.accountsTab
+        }
+    }
+}
 
 /// 팝오버 치수의 단일 소스. 자식이 쓸 수 있는 폭을 알아야 할 때 이 값을 쓴다 — 넘치는 자식이
 /// 부모 폭을 부풀리므로 GeometryReader 로 재면 순환한다.
@@ -58,6 +76,17 @@ struct PopoverView: View {
 
     private var l: L { companion.l }
     @State private var showingClaudeKeychainHelp = false
+    /// 계정 탭 노출 여부. `MobiusFeature.isEnabled` 와 같은 키를 보되 `@AppStorage` 로 읽어,
+    /// 설정에서 토글이 바뀌면 팝오버를 다시 열지 않아도 세그먼트가 따라온다.
+    @AppStorage(MobiusFeature.enabledKey) private var accountsTabEnabled = false
+
+    private var visibleTabs: [PopoverTab] { PopoverTab.visible(accountsEnabled: accountsTabEnabled) }
+
+    /// 숨겨진 탭이 선택된 상태로 남으면(계정 탭을 보다가 토글을 끈 경우) 세그먼트에 '선택 없음'이
+    /// 생기고 화면도 빈다 — 읽을 때 홈으로 정규화한다. 저장값(nav.tab)은 덮어쓰지 않는다.
+    private var selectedTab: PopoverTab {
+        visibleTabs.contains(nav.tab) ? nav.tab : .home
+    }
 
     var body: some View {
         // NOTE: 설정을 .sheet 로 띄우면 transient 팝오버가 닫힐 때 시트가 고아로 남아
@@ -111,21 +140,22 @@ struct PopoverView: View {
         @Bindable var nav = nav
         return VStack(alignment: .leading, spacing: 12) {
             updateBanner
-            Picker("", selection: $nav.tab) {
-                Text(l.home).tag(PopoverTab.home)
-                Text(l.shop).tag(PopoverTab.shop)
-                Text(l.bag).tag(PopoverTab.bag)
-                Text(l.collection).tag(PopoverTab.collection)
+            Picker("", selection: Binding(get: { selectedTab }, set: { nav.tab = $0 })) {
+                ForEach(visibleTabs, id: \.self) { tab in
+                    Text(tab.title(l)).tag(tab)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
 
-            if nav.tab == .collection {
+            if selectedTab == .collection {
                 CollectionView(store: companion, navigation: nav)
-            } else if nav.tab == .bag {
+            } else if selectedTab == .bag {
                 BagView(store: companion, nav: nav)
-            } else if nav.tab == .shop {
+            } else if selectedTab == .shop {
                 ShopView(store: companion, nav: nav)
+            } else if selectedTab == .accounts {
+                AccountsView(l: l)
             } else {
                 CompanionHeader(store: companion)
                 Divider()
