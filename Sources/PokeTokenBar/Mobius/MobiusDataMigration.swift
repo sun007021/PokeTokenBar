@@ -1,0 +1,150 @@
+import Foundation
+
+/// One-time copy of an existing Mobius.app user's data into PokeTokenBar's own state directory.
+///
+/// PokeTokenBar keeps its Mobius integration data under `AppStatePaths.directory()/mobius/`
+/// rather than sharing `~/Library/Application Support/Mobius/` with Mobius.app itself — running
+/// both apps against the same files risks the credential-corruption races Mobius's own history
+/// records (concurrent writers to `accounts.json` / Keychain). This migration only ever *copies*;
+/// it never touches the original Mobius.app data, so that app keeps working unmodified.
+///
+/// See `docs/reference/mobius-integration.md` for the data-preservation invariants this follows.
+enum MobiusDataMigration {
+
+    enum Outcome: Equatable {
+        /// Files were copied. `fileCount` counts files only (not directories).
+        case migrated(fileCount: Int)
+        /// `destination/accounts.json` already existed — a prior run already migrated this data.
+        case alreadyMigrated
+        /// `source` does not exist — the user has never run Mobius.app, not an error.
+        case noSourceData
+    }
+
+    /// Pure core: takes explicit source/destination URLs and a `FileManager` so it can be
+    /// exercised against temp directories in tests without touching the real home directory.
+    ///
+    /// Atomicity: everything is assembled in a sibling staging directory first, then moved into
+    /// `destination` with a single `moveItem` (an atomic rename on the same volume). If anything
+    /// throws before that final move, `destination` was never touched — it either doesn't exist
+    /// yet or still holds whatever a previous successful migration left there. The staging
+    /// directory is best-effort cleaned up via `defer` in both the success and failure paths (on
+    /// success it no longer exists at that path, so the cleanup is a harmless no-op).
+    static func migrate(
+        from source: URL,
+        to destination: URL,
+        fileManager: FileManager = .default
+    ) throws -> Outcome {
+        var isSourceDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: source.path, isDirectory: &isSourceDirectory),
+              isSourceDirectory.boolValue
+        else {
+            return .noSourceData
+        }
+
+        let accountsAtDestination = destination.appendingPathComponent("accounts.json")
+        if fileManager.fileExists(atPath: accountsAtDestination.path) {
+            return .alreadyMigrated
+        }
+
+        let destinationParent = destination.deletingLastPathComponent()
+        try fileManager.createDirectory(at: destinationParent, withIntermediateDirectories: true)
+
+        let staging = destinationParent.appendingPathComponent(".mobius-migration-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: staging) }
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        var fileCount = 0
+
+        let accountsSource = source.appendingPathComponent("accounts.json")
+        if fileManager.fileExists(atPath: accountsSource.path) {
+            let accountsStaging = staging.appendingPathComponent("accounts.json")
+            fileCount += try copyPreservingPermissions(
+                from: accountsSource, to: accountsStaging, fileManager: fileManager)
+            // accounts.json holds account metadata (not raw secrets) but Mobius still keeps it
+            // at 0600 in practice — enforce that explicitly rather than trust the mirrored mode.
+            try forcePermissions(0o600, onto: accountsStaging, fileManager: fileManager)
+        }
+
+        let secretsSource = source.appendingPathComponent("secrets")
+        var isSecretsDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: secretsSource.path, isDirectory: &isSecretsDirectory),
+           isSecretsDirectory.boolValue {
+            let secretsStaging = staging.appendingPathComponent("secrets")
+            fileCount += try copyPreservingPermissions(
+                from: secretsSource, to: secretsStaging, fileManager: fileManager)
+            // These files are raw credential snapshots. Mirroring the source's permissions
+            // (above) should already produce 0700/0600, but this is the one invariant that must
+            // never regress silently — a secret landing at 0644 is readable by every other local
+            // account on the Mac. Verify and force explicitly rather than trust the mirror alone.
+            try forcePermissions(0o700, onto: secretsStaging, fileManager: fileManager)
+            let secretFiles = try fileManager.contentsOfDirectory(
+                at: secretsStaging, includingPropertiesForKeys: nil)
+            for secretFile in secretFiles {
+                try forcePermissions(0o600, onto: secretFile, fileManager: fileManager)
+            }
+        }
+
+        let desktopProfilesSource = source.appendingPathComponent("desktop-profiles")
+        var isDesktopProfilesDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: desktopProfilesSource.path, isDirectory: &isDesktopProfilesDirectory),
+           isDesktopProfilesDirectory.boolValue {
+            fileCount += try copyPreservingPermissions(
+                from: desktopProfilesSource,
+                to: staging.appendingPathComponent("desktop-profiles"),
+                fileManager: fileManager)
+        }
+
+        try fileManager.moveItem(at: staging, to: destination)
+        return .migrated(fileCount: fileCount)
+    }
+
+    /// Thin real-path wrapper — not called from anywhere yet. Wiring this into the app lifecycle
+    /// is Phase 3; for now only the code and its tests exist, so runtime behavior is unchanged.
+    static func migrateIfNeeded(fileManager: FileManager = .default) throws -> Outcome {
+        let source = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Mobius")
+        let destination = AppStatePaths.directory().appendingPathComponent("mobius")
+        return try migrate(from: source, to: destination, fileManager: fileManager)
+    }
+
+    /// Recursively copies `source` to `destination`, mirroring the source's POSIX permissions on
+    /// every file and directory it creates along the way. Returns the number of files (not
+    /// directories) copied.
+    @discardableResult
+    private static func copyPreservingPermissions(
+        from source: URL, to destination: URL, fileManager: FileManager
+    ) throws -> Int {
+        let sourceAttributes = try fileManager.attributesOfItem(atPath: source.path)
+        var isDirectory: ObjCBool = false
+        fileManager.fileExists(atPath: source.path, isDirectory: &isDirectory)
+
+        if isDirectory.boolValue {
+            try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+            try mirrorPermissions(sourceAttributes, onto: destination, fileManager: fileManager)
+            var count = 0
+            let children = try fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+            for child in children {
+                count += try copyPreservingPermissions(
+                    from: child,
+                    to: destination.appendingPathComponent(child.lastPathComponent),
+                    fileManager: fileManager)
+            }
+            return count
+        } else {
+            try fileManager.copyItem(at: source, to: destination)
+            try mirrorPermissions(sourceAttributes, onto: destination, fileManager: fileManager)
+            return 1
+        }
+    }
+
+    private static func mirrorPermissions(
+        _ sourceAttributes: [FileAttributeKey: Any], onto url: URL, fileManager: FileManager
+    ) throws {
+        guard let permissions = sourceAttributes[.posixPermissions] else { return }
+        try fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
+    }
+
+    private static func forcePermissions(_ mode: Int, onto url: URL, fileManager: FileManager) throws {
+        try fileManager.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
+    }
+}
