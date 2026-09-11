@@ -65,6 +65,19 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
 - **익명 로그 라인으로 계정 상태를 기록하지 않는다.** Claude 세션 로그 hit 에는 계정 식별자가 없어
   전환 직후 옛 계정의 에러가 새 계정에 박힌다 → 자동 전환이 통째로 죽는다. 판정은 usage API 로 한다.
 
+## Phase 1 실측
+
+- **Swift 언어 모드 경계**: 이 패키지는 `swift-tools-version: 6.0` 이지만 `MobiusCore` 타깃만
+  `.swiftLanguageMode(.v5)` 로 핀 고정했다. 엔진 4,100줄을 무수정으로 이식하려면 상류(Mobius)와
+  같은 언어 모드가 필요했기 때문이다. Phase 3 에서 Swift 6 모드인 PokeTokenBar 쪽(`@MainActor`
+  상태 계층, 예: `AccountsState`)이 v5 로 컴파일된 `MobiusCore` 타입을 actor 경계 너머로 넘길 때
+  Sendable 마찰이 예상된다 — v1 대응은 필요한 지점에 `@preconcurrency import MobiusCore` 를
+  붙이는 것으로 하고, `MobiusCore` 자체를 Swift 6 모드로 옮기는 것은 별도 후속으로 남긴다.
+- **상류의 타이밍 민감 테스트**: `SessionKeySettingsRenderingTests` 는 오프스크린 윈도우를 key 로
+  만들고 500ms 고정 대기 후 스크롤 결과를 측정하므로 머신 부하에 따라 실패할 수 있다. Mobius 코드를
+  0줄 더한 기준선 커밋에서도 동일하게 재현되므로 이 통합의 회귀가 아니다 — **전체 스위트 판정 시
+  이 테스트 1건만 실패하는 것은 통과로 간주한다.**
+
 ## 단계
 
 - [ ] **Phase 0 — 안전망**: 데이터 백업(디렉터리 + UserDefaults), 포크·클론, 기준선 `swift test`
