@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var updater: UpdateChecker!
     private var floatingPet: FloatingPetController!
     private let navigation = PopoverNavigation()
+    private var accounts: AccountsState!   // 계정 전환(Mobius) — 토글이 켜졌을 때만 start()
 
     // 메뉴바 캐릭터 애니메이션 — 단일 타이머로 프레임 순환.
     // 프레임 = 이미 22px 로 합성된 이미지 + delay. egg/static 은 2프레임 bob, animated 는 GIF 실제 프레임.
@@ -76,7 +77,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         CrashReporter.install(
             version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")
         NSApp.setActivationPolicy(.accessory)
-        Self.migrateLegacyStorageIfNeeded()   // TokenMac → PokeTokenBar 리네임: 기존 companion/캐시 보존
+        // 이 세 단계의 **순서가 곧 데이터 보존**이다 — 뒤 단계가 먼저 돌면 앞 단계의
+        // "대상이 이미 있으면 건너뛴다" 판정이 걸려 이전이 영영 안 일어난다.
+        // 근거와 각 단계의 함정은 `MobiusLaunchSequence` 주석에.
+        MobiusLaunchSequence.run { step in
+            switch step {
+            case .legacyStorageRename:
+                Self.migrateLegacyStorageIfNeeded()   // TokenMac → PokeTokenBar 리네임: 기존 companion/캐시 보존
+            case .mobiusDataMigration:
+                Self.runMobiusDataMigration()
+            case .accountStateCreation:
+                accounts = AccountsState()
+            }
+        }
         LoginItem.migrateFromLegacyLoginItemIfNeeded()   // 로그인아이템 → KeepAlive 에이전트(크래시 자동 재실행)
         store = UsageStore()
         companion = CompanionStore()
@@ -496,13 +509,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// TokenMac→PokeTokenBar 리네임에 따른 1회 이전: 기존 Application Support 폴더를
     /// 새 이름으로 옮겨 companion 진행상황·스프라이트 캐시·스냅샷을 보존한다(신규 폴더 없을 때만).
-    private static func migrateLegacyStorageIfNeeded() {
-        let fm = FileManager.default
-        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    /// ★ `base`/`fileManager` 는 **테스트 주입 전용** 파라미터다 — 이 게이트
+    /// (`!fileExists(atPath: new.path)`)가 순서 계약의 함정 그 자체라,
+    /// `MobiusLaunchSequenceTests` 가 복제본이 아니라 **이 함수**를 임시 디렉터리에 대고 돌린다.
+    nonisolated static func migrateLegacyStorageIfNeeded(
+        base: URL? = nil, fileManager fm: FileManager = .default
+    ) {
+        let base = base ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let old = base.appendingPathComponent("TokenMac")
         let new = base.appendingPathComponent("PokeTokenBar")
         guard fm.fileExists(atPath: old.path), !fm.fileExists(atPath: new.path) else { return }
         try? fm.moveItem(at: old, to: new)
+    }
+
+    /// 독립 Mobius.app 데이터 1회 이전. **실패해도 앱 시작을 막지 않는다** — 계정 전환은 부가
+    /// 기능인데 여기서 던지면 포켓몬 앱 전체가 못 뜬다. 실패 시 대상 디렉터리가 안 만들어지므로
+    /// 다음 실행에서 자연히 재시도된다.
+    private nonisolated static func runMobiusDataMigration() {
+        do {
+            switch try MobiusDataMigration.migrateIfNeeded() {
+            case .migrated(let fileCount):
+                AppLog.write("mobius: migrated \(fileCount) file(s) from the standalone Mobius app")
+            case .alreadyMigrated, .noSourceData, .nothingToMigrate:
+                break
+            }
+        } catch {
+            AppLog.write("mobius: data migration failed, continuing without it: \(error)")
+        }
     }
 
     /// 스프라이트가 아직 없을 때(부화 전/로딩 중) 메뉴바에 표시하는 알 글리프.

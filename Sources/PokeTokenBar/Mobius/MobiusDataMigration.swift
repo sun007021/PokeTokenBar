@@ -121,11 +121,21 @@ enum MobiusDataMigration {
 
     /// Thin real-path wrapper — not called from anywhere yet. Wiring this into the app lifecycle
     /// is Phase 3; for now only the code and its tests exist, so runtime behavior is unchanged.
-    static func migrateIfNeeded(fileManager: FileManager = .default) throws -> Outcome {
-        let source = FileManager.default.homeDirectoryForCurrentUser
+    /// 독립 Mobius.app 의 기본 데이터 위치.
+    static var defaultSource: URL {
+        FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Mobius")
+    }
+
+    /// ★ `source` 는 **테스트 주입 전용**이다 — 실제 `~/Library/Application Support/Mobius` 에
+    /// 대고 테스트를 돌리지 않기 위한 것. 대상 경로 유도(`AppStatePaths.directory()` 호출이
+    /// 상태 디렉터리를 **만든다**)는 주입하지 않는다: 그게 순서 계약의 함정 당사자라
+    /// `MobiusLaunchSequenceTests` 가 프로덕션과 같은 경로로 밟아야 한다.
+    static func migrateIfNeeded(
+        source: URL? = nil, fileManager: FileManager = .default
+    ) throws -> Outcome {
         let destination = AppStatePaths.directory().appendingPathComponent("mobius")
-        return try migrate(from: source, to: destination, fileManager: fileManager)
+        return try migrate(from: source ?? defaultSource, to: destination, fileManager: fileManager)
     }
 
     /// Recursively copies `source` to `destination`, mirroring the source's POSIX permissions on
