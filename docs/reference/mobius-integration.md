@@ -91,7 +91,9 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
 - [ ] **Phase 5 — 설정 섹션**: 자동 전환(Claude/Codex) · 계정 추가 · 게이지 · 미리 전환 · 알림
 - [ ] **Phase 6 — 안전장치**: 이중 writer 가드(`dev.chussum.mobius` 실행 감지), 전환 시
       `OAuthAccessTokenCache.shared.invalidate()`, 디스플레이 슬립 시 틱 정지
-- [ ] **Phase 7 — 다국어**: 약 115개 문자열 × 7개 언어. `L` 구조체 방식(lproj·`Bundle.module` 금지)
+- [ ] **Phase 7 — 다국어**: 약 115개 문자열 × 7개 언어. `L` 구조체 방식(lproj·`Bundle.module` 금지).
+      이관 대상은 `Sources/PokeTokenBar/Mobius/MobiusStrings.swift` 의 `loc(_:)`/`loc(_:_:)` —
+      Phase 3 이 만든 임시 경유지로, 지금은 키(한국어 원문)를 그대로 돌려준다
 - [ ] **Phase 8 — 게이트·빌드**: `test-gate.sh` 화이트리스트 갱신, 고정 서명 인증서, `/Applications` 설치
 
 ## 상태 계층을 `ObservableObject` 로 두는 이유
