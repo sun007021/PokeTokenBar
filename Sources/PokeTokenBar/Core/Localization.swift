@@ -1027,4 +1027,65 @@ struct L {
           "Você esgotou seu limite de tokens — \(window). Você merece um agrado: use no seu Pokémon para evoluir!",
           "Du hast das Token-Limit für \(window) ausgeschöpft. Eine Belohnung für deinen Einsatz – verwende sie, um dein Pokémon zu entwickeln!")
     }
+
+    // MARK: 계정 탭 (Claude·Codex 계정 전환)
+    // 용어: 사용자에게는 '전환'만 노출한다 — primary/fallback 같은 내부 역할명은 쓰지 않고
+    // '기본 계정'으로만 말한다. 카드를 누르면 그 계정으로 바뀌고, 한도가 차면 자동으로 이어진다.
+    // 폭 주의: 이 문자열들은 360pt 팝오버의 카드 안에 들어간다. 배지·게이지 라벨은 짧게 —
+    // `AccountsTabLayoutTests` 가 7개 언어로 실제 렌더 폭을 확인한다.
+
+    var accountsTab: String { t("계정", "Accounts", "アカウント", "Cuentas", "Comptes", "Contas", "Konten") }
+    var accountsEmptyTitle: String { t("등록된 계정이 없어요", "No accounts yet", "アカウントがありません", "Aún no hay cuentas", "Aucun compte pour l'instant", "Nenhuma conta ainda", "Noch keine Konten") }
+    var accountsAdd: String { t("계정 추가", "Add account", "アカウントを追加", "Añadir cuenta", "Ajouter un compte", "Adicionar conta", "Konto hinzufügen") }
+    var accountsAddClaude: String { t("Claude 계정 추가", "Add Claude account", "Claude アカウントを追加", "Añadir cuenta de Claude", "Ajouter un compte Claude", "Adicionar conta Claude", "Claude-Konto hinzufügen") }
+    var accountsCodexGuideTitle: String { t("Codex는 터미널로 추가해요", "Add Codex from the terminal", "Codex はターミナルから追加します", "Codex se añade desde la terminal", "Codex s'ajoute depuis le terminal", "O Codex é adicionado pelo terminal", "Codex wird im Terminal hinzugefügt") }
+    var accountsCodexGuideBody: String {
+        t("터미널에서 `codex logout` 후 `codex login` 으로 추가할 계정에 로그인하면 몇 초 안에 자동으로 등록돼요.",
+          "Run `codex logout`, then `codex login` and sign in with the account you want to add — it shows up here within seconds.",
+          "ターミナルで `codex logout` のあと `codex login` で追加したいアカウントにログインすると、数秒で自動的に登録されます。",
+          "En la terminal, ejecuta `codex logout` y luego `codex login` e inicia sesión con la cuenta que quieras añadir: aparecerá aquí en unos segundos.",
+          "Dans le terminal, lance `codex logout` puis `codex login` et connecte-toi avec le compte à ajouter : il apparaît ici en quelques secondes.",
+          "No terminal, execute `codex logout` e depois `codex login` e entre com a conta que quer adicionar — ela aparece aqui em segundos.",
+          "Führe im Terminal `codex logout` und dann `codex login` aus und melde dich mit dem gewünschten Konto an – es erscheint hier innerhalb weniger Sekunden.")
+    }
+    var accountsCodexGuideNote: String {
+        t("지금 쓰던 계정은 이미 카드로 저장돼 있어 언제든 눌러 되돌아올 수 있어요.",
+          "The account you're using now is already saved as a card, so you can switch back any time.",
+          "いま使っているアカウントはすでにカードとして保存されているので、いつでも戻れます。",
+          "La cuenta que usas ahora ya está guardada como tarjeta, así que puedes volver cuando quieras.",
+          "Le compte que tu utilises est déjà enregistré comme carte : tu peux y revenir à tout moment.",
+          "A conta que você usa agora já está salva como cartão, então dá para voltar quando quiser.",
+          "Das Konto, das du gerade nutzt, ist schon als Karte gespeichert – du kannst jederzeit zurückwechseln.")
+    }
+    var accountsSwitchHelp: String { t("이 계정으로 전환", "Switch to this account", "このアカウントに切り替え", "Cambiar a esta cuenta", "Basculer vers ce compte", "Mudar para esta conta", "Zu diesem Konto wechseln") }
+    /// 기본 계정 배지 — 카드 이름 옆의 아주 작은 캡슐이라 가장 짧은 표기를 쓴다.
+    var accountsPrimaryBadge: String { t("기본", "PRIMARY", "メイン", "PRINCIPAL", "PRINCIPAL", "PRINCIPAL", "HAUPT") }
+    var accountsSetPrimary: String { t("기본 계정으로 설정", "Make primary", "メインに設定", "Hacer principal", "Définir comme principal", "Tornar principal", "Als Hauptkonto festlegen") }
+    var accountsDeleteAccount: String { t("계정 삭제", "Delete account", "アカウントを削除", "Eliminar cuenta", "Supprimer le compte", "Excluir conta", "Konto löschen") }
+    /// 확정(빨강) — 저장된 자격증명으로는 더 못 쓴다.
+    var accountsReauthBadge: String { t("재로그인 필요", "Sign-in expired", "再ログインが必要", "Sesión caducada", "Reconnexion requise", "Sessão expirada", "Neuanmeldung nötig") }
+    /// 의심(주황) — 확정이 아니다. 문구도 색도 위와 구분한다.
+    var accountsAuthSuspectBadge: String { t("인증 확인 필요", "Check sign-in", "認証の確認が必要", "Revisar sesión", "Vérifier la connexion", "Verificar sessão", "Anmeldung prüfen") }
+    var accountsReauthAction: String { t("다시 로그인", "Sign in again", "再ログイン", "Iniciar sesión", "Se reconnecter", "Entrar de novo", "Neu anmelden") }
+    /// 소진이 아니라 "곧 참" — 소진(빨강)·재인증(주황)보다 낮은 심각도(노랑).
+    var accountsAdvisoryBadge: String { t("한도 근접", "Near limit", "上限が近い", "Cerca del límite", "Proche de la limite", "Perto do limite", "Limit fast erreicht") }
+    var accountsCodexAwaitingData: String {
+        t("codex를 한 번 쓰면 사용량이 표시돼요",
+          "Usage appears after your next codex turn",
+          "codex を一度使うと使用量が表示されます",
+          "El uso aparece tras tu próximo turno de codex",
+          "L'usage s'affiche après ton prochain tour codex",
+          "O uso aparece após seu próximo turno no codex",
+          "Die Nutzung erscheint nach deiner nächsten codex-Runde")
+    }
+    var accountsGaugeFiveHour: String { t("5시간", "5h", "5時間", "5 h", "5 h", "5 h", "5 Std.") }
+    var accountsGaugeWeekly: String { t("주간", "Week", "週間", "Sem.", "Sem.", "Sem.", "Woche") }
+    func accountsResetsIn(_ remain: String) -> String { t("\(remain) 후 초기화", "Resets in \(remain)", "\(remain)後にリセット", "Se reinicia en \(remain)", "Réinitialisation dans \(remain)", "Reinicia em \(remain)", "Zurücksetzung in \(remain)") }
+    /// 계정 전체가 아니라 **그 모델만** 막힌 상태 — 계정은 다른 모델로 계속 쓸 수 있다.
+    func accountsModelLimitResetsIn(_ remain: String) -> String { t("모델 한도 · \(remain) 후 초기화", "Model limit · resets in \(remain)", "モデル上限・\(remain)後にリセット", "Límite del modelo · en \(remain)", "Limite du modèle · dans \(remain)", "Limite do modelo · em \(remain)", "Modell-Limit · in \(remain)") }
+    /// 게이지 값이 오래됐을 때의 기준 시각 표기 — "실패"라고 단정하지 않는다(그동안 안 썼을 수도 있다).
+    func accountsUsageAsOf(_ ago: String) -> String { t("\(ago) 전 값", "\(ago) old", "\(ago)前の値", "de hace \(ago)", "il y a \(ago)", "de \(ago) atrás", "vor \(ago)") }
+    func accountsDurationDays(_ days: Int, _ hours: Int) -> String { t("\(days)일 \(hours)시간", "\(days)d \(hours)h", "\(days)日\(hours)時間", "\(days) d \(hours) h", "\(days) j \(hours) h", "\(days) d \(hours) h", "\(days) T \(hours) Std.") }
+    func accountsDurationHours(_ hours: Int, _ minutes: Int) -> String { t("\(hours)시간 \(minutes)분", "\(hours)h \(minutes)m", "\(hours)時間\(minutes)分", "\(hours) h \(minutes) min", "\(hours) h \(minutes) min", "\(hours) h \(minutes) min", "\(hours) Std \(minutes) Min") }
+    func accountsDurationMinutes(_ minutes: Int) -> String { t("\(minutes)분", "\(minutes)m", "\(minutes)分", "\(minutes) min", "\(minutes) min", "\(minutes) min", "\(minutes) Min") }
 }
