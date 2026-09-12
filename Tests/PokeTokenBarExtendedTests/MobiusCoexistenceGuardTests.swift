@@ -35,7 +35,7 @@ final class MobiusCoexistenceGuardTests: XCTestCase {
     }
 
     func testIgnoresOtherApplications() {
-        XCTAssertFalse(MobiusCoexistence.isBlocked(by: [instance("io.github.chattymin.poketokenbar")]))
+        XCTAssertFalse(MobiusCoexistence.isBlocked(by: [instance("io.github.sun007021.poketokenbarextended")]))
     }
 
     func testBlocksWhenOneOfSeveralInstancesIsAlive() {
@@ -62,7 +62,7 @@ final class MobiusCoexistenceGuardTests: XCTestCase {
         XCTAssertTrue(MobiusCoexistence.notificationConcernsMobius(
             bundleID: MobiusCoexistence.mobiusBundleID))
         XCTAssertFalse(MobiusCoexistence.notificationConcernsMobius(
-            bundleID: "io.github.chattymin.poketokenbar"))
+            bundleID: "io.github.sun007021.poketokenbarextended"))
         XCTAssertTrue(MobiusCoexistence.notificationConcernsMobius(bundleID: nil),
                       "번들 ID 를 못 읽었으면 걸러내지 말고 다시 조회해야 한다")
     }
