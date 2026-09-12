@@ -30,19 +30,19 @@ THRESHOLD="${THRESHOLD:-75}"
 # 받는 파일(예: `AccountStore` 의 `KeychainClient`, `CodexUsageProber` 의 `fetch`)은 결정적이므로
 # 포함한다.
 LOGIC_CORE=(
-  # PokeTokenBar 로직 코어
-  "Sources/PokeTokenBar/Core/CompanionModel.swift"
-  "Sources/PokeTokenBar/Core/CompanionStore.swift"
-  "Sources/PokeTokenBar/Core/PokemonProfile.swift"
-  "Sources/PokeTokenBar/Core/UsageStore.swift"
-  "Sources/PokeTokenBar/Core/Models.swift"
-  "Sources/PokeTokenBar/Core/UsageCost.swift"
-  "Sources/PokeTokenBar/Core/TokenFormatter.swift"
-  "Sources/PokeTokenBar/Core/UsageProvider.swift"
-  "Sources/PokeTokenBar/Core/LocalUsageReader.swift"
-  "Sources/PokeTokenBar/Core/LocalUsageCache.swift"
-  "Sources/PokeTokenBar/Core/ModelPricing.swift"
-  "Sources/PokeTokenBar/Core/CustomScanRoots.swift"
+  # PokeTokenBarExtended 로직 코어
+  "Sources/PokeTokenBarExtended/Core/CompanionModel.swift"
+  "Sources/PokeTokenBarExtended/Core/CompanionStore.swift"
+  "Sources/PokeTokenBarExtended/Core/PokemonProfile.swift"
+  "Sources/PokeTokenBarExtended/Core/UsageStore.swift"
+  "Sources/PokeTokenBarExtended/Core/Models.swift"
+  "Sources/PokeTokenBarExtended/Core/UsageCost.swift"
+  "Sources/PokeTokenBarExtended/Core/TokenFormatter.swift"
+  "Sources/PokeTokenBarExtended/Core/UsageProvider.swift"
+  "Sources/PokeTokenBarExtended/Core/LocalUsageReader.swift"
+  "Sources/PokeTokenBarExtended/Core/LocalUsageCache.swift"
+  "Sources/PokeTokenBarExtended/Core/ModelPricing.swift"
+  "Sources/PokeTokenBarExtended/Core/CustomScanRoots.swift"
 
   # Mobius 계정 전환 엔진 (Sources/MobiusCore)
   # 제외: KeychainClient(Security + `security` 서브프로세스),
@@ -71,16 +71,16 @@ LOGIC_CORE=(
   "Sources/MobiusCore/SyncEngine.swift"
   "Sources/MobiusCore/UsagePollBreaker.swift"
 
-  # Mobius 호스트 계층 (Sources/PokeTokenBar/Mobius)
+  # Mobius 호스트 계층 (Sources/PokeTokenBarExtended/Mobius)
   # 제외: AccountsState(@MainActor 오케스트레이션 — 타이머·알림·NSWorkspace. 결정 로직은
   #       MobiusCore 순수 함수로 내려가 있고 나머지는 수동 QA 영역),
   #       LoginFlow / DesktopCoordinator / ClaudeCLI / ToolInventory(서브프로세스·PATH·
   #       설치된 앱 탐색 — 개발 머신 상태에 따라 결과가 달라진다),
   #       MobiusFeature / MobiusPaths(UserDefaults 읽기와 경로 결합 한 줄 — 로직 0).
-  "Sources/PokeTokenBar/Mobius/MobiusCoexistence.swift"
-  "Sources/PokeTokenBar/Mobius/MobiusDataMigration.swift"
-  "Sources/PokeTokenBar/Mobius/MobiusLaunchSequence.swift"
-  "Sources/PokeTokenBar/Mobius/MobiusSwitchSideEffects.swift"
+  "Sources/PokeTokenBarExtended/Mobius/MobiusCoexistence.swift"
+  "Sources/PokeTokenBarExtended/Mobius/MobiusDataMigration.swift"
+  "Sources/PokeTokenBarExtended/Mobius/MobiusLaunchSequence.swift"
+  "Sources/PokeTokenBarExtended/Mobius/MobiusSwitchSideEffects.swift"
 )
 
 echo "▶ swift test (--enable-code-coverage)"
@@ -88,7 +88,7 @@ swift test --enable-code-coverage
 
 PROF=$(find .build -name 'default.profdata' | head -1)
 # dSYM 안에도 같은 이름의 DWARF 바이너리가 있어 head -1 이 그걸 집으면 llvm-cov 가 실패한다 → 제외.
-BIN=$(find .build -name 'PokeTokenBarPackageTests' -type f ! -path '*.dSYM/*' | head -1)
+BIN=$(find .build -name 'PokeTokenBarExtendedPackageTests' -type f ! -path '*.dSYM/*' | head -1)
 if [[ -z "$PROF" || -z "$BIN" ]]; then
   echo "✗ 커버리지 산출물(profdata/binary)을 찾지 못했습니다." >&2
   exit 1

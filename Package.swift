@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "PokeTokenBar",
+    name: "PokeTokenBarExtended",
     platforms: [.macOS(.v14)],
     targets: [
         .target(
@@ -11,15 +11,15 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
-            name: "PokeTokenBar",
+            name: "PokeTokenBarExtended",
             dependencies: ["MobiusCore"],
-            path: "Sources/PokeTokenBar",
+            path: "Sources/PokeTokenBarExtended",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(
-            name: "PokeTokenBarTests",
-            dependencies: ["PokeTokenBar"],
-            path: "Tests/PokeTokenBarTests",
+            name: "PokeTokenBarExtendedTests",
+            dependencies: ["PokeTokenBarExtended"],
+            path: "Tests/PokeTokenBarExtendedTests",
             resources: [
                 .copy("Fixtures/CodexFork"),
                 .copy("Fixtures/CodexSubagent"),
