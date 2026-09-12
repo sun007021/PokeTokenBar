@@ -147,6 +147,44 @@ final class AutoSwitchEngineTests: XCTestCase {
                        .switchTo(primary.id, reason: .primaryRecovered))
     }
 
+    /// 모델 전용 한도로 떠난 primary 의 **복귀 게이트** — `noteSwitched(forModelLimit:leftAccount:)`
+    /// 가 세우는 `modelLimitLeftAccount` 가 실제로 게이트로 쓰이는지.
+    ///
+    /// ★ 이 테스트가 없던 동안 `AutoSwitchEngine.swift` 의 라인 커버리지는 99.34% 였지만
+    ///   `--show-regions` 로 보면 이 분기가 `^0` 이었다 — `forModelLimit: true` 로 부르는
+    ///   테스트가 하나도 없어 `modelLimitLeftAccount` 가 늘 nil 이었고, onTick 의 삼항은 항상
+    ///   `: nil` 쪽만 탔다(게이트 자체가 한 번도 안 돈 채 초록불). CLAUDE.md §결함 대응 3.
+    func testModelLimitReturnGateAppliesOnlyToTheAccountLeftForThatReason() {
+        // 자동 전환으로 fb1 활성, primary 에는 **모델 전용** 한도 기록(t0+3600 리셋)
+        file.activeAccountID = fb1.id
+        file.autoSwitchedFromPrimary = true
+        file.accounts[0].rateLimit = RateLimitInfo(resetsAt: t0.addingTimeInterval(3600),
+                                                  recordedAt: t0, modelScoped: true)
+        // 쿨다운 밖 — 여기서 막히면 그건 쿨다운이 아니라 모델 게이트다
+        let afterCooldown = t0.addingTimeInterval(AutoSwitchEngine().cooldown + 1)
+
+        // (1) 모델 한도 때문에 primary 를 떠났다 → 그 창이 리셋 + margin 될 때까지 복귀 금지
+        let gated = AutoSwitchEngine()
+        gated.noteSwitched(now: t0, forModelLimit: true, leftAccount: primary.id)
+        XCTAssertEqual(gated.onTick(file: file, now: afterCooldown), .none)
+        XCTAssertEqual(gated.onTick(file: file, now: t0.addingTimeInterval(3600 + gated.margin + 1)),
+                       .switchTo(primary.id, reason: .primaryRecovered))
+
+        // (2) primary 상태가 똑같아도 **다른 이유**로 떠났으면 게이트가 아니다 — 모델 한도는
+        //     며칠 가므로 무조건 게이트로 쓰면 계정 자체는 멀쩡한 primary 로 일주일 내내
+        //     못 돌아온다.
+        let ungated = AutoSwitchEngine()
+        ungated.noteSwitched(now: t0)
+        XCTAssertEqual(ungated.onTick(file: file, now: afterCooldown),
+                       .switchTo(primary.id, reason: .primaryRecovered))
+
+        // (3) 모델 한도로 떠났더라도 떠난 계정이 **다른 계정**이면 primary 의 게이트가 아니다.
+        let other = AutoSwitchEngine()
+        other.noteSwitched(now: t0, forModelLimit: true, leftAccount: fb2.id)
+        XCTAssertEqual(other.onTick(file: file, now: afterCooldown),
+                       .switchTo(primary.id, reason: .primaryRecovered))
+    }
+
     func testCooldownPreventsFlapping() {
         let engine = AutoSwitchEngine()
         _ = engine.onRateLimitHit(file: file,
