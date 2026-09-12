@@ -378,6 +378,32 @@ read_when:
   `default.profdata` 를 구형 Xcode의 `xcrun llvm-cov` 로 읽으면 `unsupported instrumentation profile format
   version` 으로 테스트 성공 뒤 게이트만 실패한다. `test-gate.sh` 는 현재 `swift` 실경로 옆의 `llvm-cov` 를
   우선하고, sibling이 없는 Apple toolchain에서만 `xcrun --find llvm-cov` 로 폴백한다.
+- **레이아웃 측정 테스트는 윈도우 서버가 없으면 무한대(sentinel)를 돌려준다 — 값이 틀린 게
+  아니라 잴 방법이 없는 것이다.** `AccountsTabLayoutTests` 의 두 테스트
+  (`testAddingTheAccountsTabGrowsTheBarByExactlyOneEvenSegment`,
+  `testTabWidthGuardActuallyRejectsALabelThatWidensTheSegment`)가 GitHub Actions macos-15(헤드리스
+  러너)에서 `XCTAssertEqualWithAccuracy failed: ("1.7976931348623157e+308") is not equal to ("inf")`
+  로 실패했다. 원인은 `.pickerStyle(.segmented)` — AppKit `NSSegmentedControl` 로 브릿지되는 유일한
+  컨트롤이라 진짜 세그먼트 폭을 재려면 윈도우 서버가 필요하다. 없으면 `NSHostingController.
+  sizeThatFits` 가 0/에러가 아니라 SwiftUI 의 "무제한" 센티널(`.greatestFiniteMagnitude`/`.infinity`)을
+  돌려준다. 같은 파일의 카드 폭 테스트(`AccountCardView` 등)는 순수 SwiftUI `Text`/`HStack` 이라
+  이 문제가 없다 — **AppKit 백드 컨트롤만 해당한다**(`Picker(.menu)` 는 실측상 문제 없었다).
+  **왜 못 걸렀나:** 로컬(윈도우 서버 있음)에서는 언제나 통과해 CI 전용 결함이 리뷰·로컬 QA 양쪽을
+  통과했다. → **감지는 환경변수(`CI` 등)가 아니라 측정값으로 한다** — 값 기반 판정은 다른 헤드리스
+  환경(SSH 세션, launchd 데몬)에서도 같은 원인으로 또 깨지는 것을 막고, 환경변수 판정은 원인이 아니라
+  증상(어디서 도는가)만 본다. `.greatestFiniteMagnitude.isFinite == true` 이므로 순수 `isFinite` 검사로는
+  절반(그 값)을 놓친다 — 값이 비현실적으로 큰지(`!isFinite || >= 100_000`)까지 같이 봐야 한다.
+  실패하는 두 assertion **직전**에서 `throw XCTSkip("...")` 하고, 스킵 메시지에 원인(윈도우 서버 부재)을
+  적어 사람이 읽을 수 있게 한다 — 이미 이 저장소가 쓰는 관용구(`PTB_PARITY`/`PTB_COST_AUDIT` 가드류와
+  같은 자리, 값 기반이라는 점만 다르다). **주입 검증**: 판정 임계값을 일부러 항상 참이 되게 바꿔
+  스킵이 실제로 걸리는지 확인한 뒤 되돌렸다(결함 프로토콜 3 — 가드가 작동하는지 확인 없이 넣지 않는다).
+  **부류 스윕**: `Sources/` 전체에서 `.pickerStyle(.segmented)` 를 쓰는 다른 두 자리
+  (`SettingsView.swift` 의 `limitDisplayMode`, `CompanionView.swift` 의 도감/포획로그 토글)는 어느
+  레이아웃 테스트도 `sizeThatFits` 로 재지 않아 안전하다. `AccountSwitchingSettingsTests` 의
+  `thresholdPicker` 는 `.pickerStyle(.menu)` 라 이 부류가 아니다(CI 에서도 통과 확인).
+  새 레이아웃 테스트를 쓸 때: 재려는 뷰가 `Picker(.segmented)`(또는 다른 AppKit 백드 컨트롤)를
+  포함하면 측정값이 센티널인지부터 가드하고, 순수 SwiftUI 뷰(`Text`/`HStack`/커스텀 `View`)만 재는
+  테스트는 이 문제가 없다는 것도 함께 확인해 둔다.
 
 ## 자격증명·Keychain
 

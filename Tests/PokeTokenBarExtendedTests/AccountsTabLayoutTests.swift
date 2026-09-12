@@ -55,6 +55,27 @@ final class AccountsTabLayoutTests: XCTestCase {
         .labelsHidden()
     }
 
+    /// `.pickerStyle(.segmented)` bridges to an AppKit `NSSegmentedControl` — unlike the plain
+    /// SwiftUI `Text`/`HStack` layouts this file measures elsewhere (those pass in headless CI),
+    /// this control needs a window server to compute its real per-segment width. Without one
+    /// (headless CI, e.g. GitHub Actions macos-15 runners), `sizeThatFits` doesn't fail or return
+    /// zero — it comes back with SwiftUI's "take all the space you want" sentinel instead: measured
+    /// 2026-09-12 as `.greatestFiniteMagnitude` for the 4-tab bar and `.infinity` for the 5-tab bar.
+    /// `.greatestFiniteMagnitude.isFinite == true`, so a plain finiteness check misses half the
+    /// sentinel — this checks the *value* (implausibly large for any real pt width) rather than an
+    /// environment variable, so it also catches other headless runs (e.g. an SSH session, a launchd
+    /// daemon) that a `CI` env-var check would miss.
+    private func skipIfUnmeasurable(_ widths: CGFloat...) throws {
+        if let sentinel = widths.first(where: { !$0.isFinite || $0 >= 100_000 }) {
+            throw XCTSkip("""
+                Segmented Picker returned a sentinel width (\(sentinel)pt) instead of a real \
+                measurement — this environment has no window server, so the AppKit-backed \
+                NSSegmentedControl can't size itself. This assertion needs real segment widths; \
+                it still runs normally on a real display (local dev, or an interactive CI runner).
+                """)
+        }
+    }
+
     /// ★ 실측(2026-09-11)으로 정한 기준이다. macOS 세그먼트 픽커는 **모든 세그먼트를 가장 긴
     /// 라벨에 맞춰 같은 폭으로** 잡는다 — 7개 언어 전부에서 5탭 이상적 폭이 4탭의 정확히 1.25배로
     /// 나왔다(ko 220→275, en 328→410, ja 356→445, de 340→425 …). 그래서 "332pt 안에 들어오나"는
@@ -75,11 +96,12 @@ final class AccountsTabLayoutTests: XCTestCase {
 
     /// 위 성질의 컨트롤 차원 확인 — 탭이 하나 늘어도 바의 이상적 폭은 **정확히 한 칸분**만
     /// 커져야 한다. 계정 라벨이 최장이 되면 이 비율이 1.25를 넘는다.
-    func testAddingTheAccountsTabGrowsTheBarByExactlyOneEvenSegment() {
+    func testAddingTheAccountsTabGrowsTheBarByExactlyOneEvenSegment() throws {
         for language in AppLanguage.allCases {
             let l = L(language)
             let four = naturalWidth(tabPicker(l, tabs: PopoverTab.visible(accountsEnabled: false)))
             let five = naturalWidth(tabPicker(l, tabs: PopoverTab.visible(accountsEnabled: true)))
+            try skipIfUnmeasurable(four, five)
             XCTAssertEqual(five, four * 5 / 4, accuracy: 1,
                            "\(language.rawValue): 4탭 \(four)pt → 5탭 \(five)pt. 한 칸분(=\(four * 5 / 4)pt)을 넘으면 계정 라벨이 세그먼트 폭을 키운 것이다")
         }
@@ -87,7 +109,7 @@ final class AccountsTabLayoutTests: XCTestCase {
 
     /// 위 두 가드가 "넓은 라벨에 실제로 실패하는가" — 통과만 보면 아무것도 안 지키는 측정과
     /// 구별할 수 없다. 같은 측정 함수에 일부러 긴 라벨을 먹여 비율이 깨지는지 확인한다.
-    func testTabWidthGuardActuallyRejectsALabelThatWidensTheSegment() {
+    func testTabWidthGuardActuallyRejectsALabelThatWidensTheSegment() throws {
         let l = L(.ko)
         let four = naturalWidth(tabPicker(l, tabs: PopoverTab.visible(accountsEnabled: false)))
         let overlong = Picker("", selection: .constant(4)) {
@@ -99,7 +121,9 @@ final class AccountsTabLayoutTests: XCTestCase {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        XCTAssertGreaterThan(naturalWidth(overlong), four * 5 / 4 + 1,
+        let overlongWidth = naturalWidth(overlong)
+        try skipIfUnmeasurable(four, overlongWidth)
+        XCTAssertGreaterThan(overlongWidth, four * 5 / 4 + 1,
                              "측정이 '세그먼트를 넓히는 라벨'을 감지하지 못하면 위 가드는 무의미하다")
     }
 
