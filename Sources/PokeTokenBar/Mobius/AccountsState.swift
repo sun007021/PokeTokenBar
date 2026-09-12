@@ -209,10 +209,13 @@ final class AccountsState: ObservableObject {
     /// 사용자가 기능을 켜 두었는가(= 마스터 토글). 엔진이 **실제로** 도는지와는 다르다 —
     /// 켜 두었어도 외부 Mobius.app 이 살아 있으면 엔진은 내려가 있다.
     private var wantsEngine = false
-    /// 외부 앱 감시 타이머. **엔진과 별개로** 돈다 — 막힌 동안에는 틱이 없으므로 여기에 얹지
-    /// 않으면 Mobius.app 을 종료해도 앱을 재시작하기 전까지 영영 복구되지 않는다.
+    /// 외부 앱 감시의 본체 — `NSWorkspace` 실행/종료 알림 구독. **엔진과 별개로** 산다.
+    /// 막힌 동안에는 틱이 없으므로 여기에 얹지 않으면 Mobius.app 을 종료해도 앱을 재시작하기
+    /// 전까지 영영 복구되지 않는다.
+    private var externalAppWatchObservers: [NSObjectProtocol] = []
+    /// 알림을 놓친 경우의 **저빈도 안전망**. 아래 `startExternalAppWatch()` 주석 참조.
     private var externalAppWatchTimer: Timer?
-    static let externalAppWatchInterval: TimeInterval = 5
+    static let externalAppWatchInterval: TimeInterval = 60
 
     private var lastReconcileAt = Date.distantPast
     private var lastActiveSnapshotSyncAt = Date.distantPast
@@ -356,6 +359,7 @@ final class AccountsState: ObservableObject {
         if let observer {
             DistributedNotificationCenter.default().removeObserver(observer)
         }
+        stopExternalAppWatch()
     }
 
     // MARK: 수명주기
@@ -366,26 +370,66 @@ final class AccountsState: ObservableObject {
     ///
     /// ★ "켰다"와 "엔진이 돈다"는 **다르다.** 기존 Mobius.app 이 실행 중이면 같은 전역
     /// 자격증명을 두 프로세스가 스왑하게 되므로(`MobiusCoexistence`) 엔진은 뜨지 않고,
-    /// 대신 가벼운 감시 타이머만 남아 상대가 종료되는 순간 자동으로 이어받는다.
+    /// 대신 가벼운 감시(`NSWorkspace` 구독 + 저빈도 안전망)만 남아 상대가 종료되는 순간
+    /// 자동으로 이어받는다.
     /// 중복 호출은 무시한다 — 타이머가 겹치면 틱이 쌓여 이슈 #15의 되먹임을 되살린다.
     func start() {
         guard !wantsEngine else { return }
         wantsEngine = true
         startExternalAppWatch()
-        // 감시 타이머의 첫 발화(5초 뒤)를 기다리지 않는다 — 그 사이에 엔진이 떠서 전환을
-        // 한 번 해 버리면 가드가 있으나 마나다.
+        // ★ 초기 상태는 여기서만 잡힌다 — `NSWorkspace` 알림은 **구독 이후의 변화**만 주므로,
+        // 앱을 켤 때 이미 Mobius.app 이 떠 있는 경우는 이 즉시 판정이 없으면 영영 안 보인다
+        // (그리고 그 사이에 엔진이 떠서 전환을 한 번 해 버리면 가드가 있으나 마나다).
         reevaluateExternalApp()
     }
 
-    /// 외부 Mobius.app 감시를 건다. 판정 자체는 `reevaluateExternalApp()` 이 하고, 이 타이머는
+    /// 외부 Mobius.app 감시를 건다. 판정 자체는 `reevaluateExternalApp()` 이 하고, 이 감시는
     /// **엔진이 내려가 있는 동안에도** 살아 있어야 한다 — 자동 재개의 유일한 동력이다.
+    ///
+    /// **폴링이 아니라 이벤트 구동이다.** 예전에는 5초마다 `NSRunningApplication` 을 조회해,
+    /// 아무 일도 일어나지 않는 유휴 상태에서도 분당 12회 LaunchServices 왕복 + wakeup 을 냈다.
+    /// `NSWorkspace` 의 실행/종료 알림은 **변화가 있을 때만** 오므로 유휴 비용이 0 이 된다.
+    /// 알림이 주지 않는 것은 **초기 상태**뿐이고(앱을 켤 때 이미 Mobius.app 이 떠 있는 경우),
+    /// 그건 `start()` 가 감시를 건 직후 곧바로 부르는 `reevaluateExternalApp()` 이 잡는다.
+    ///
+    /// ★ **안전망 타이머는 남긴다 — 이건 폴링을 없애는 최적화지 안전장치를 약하게 만드는
+    /// 변경이 아니다.** 알림 경로에는 우리가 통제할 수 없는 틈이 남는다: 종료 알림이 배달되는
+    /// 시점과 `NSRunningApplication.isTerminated` 가 반영되는 시점의 레이스, 그리고 상대가
+    /// 알림을 내지 않는 방식으로 사라지는 경우. 놓치면 두 앱이 같은 자격증명을 스왑해 라이브
+    /// 로그인이 **에러 없이** 오염되므로(`MobiusCoexistence`), 60초 주기로 한 번 더 확인한다 —
+    /// 옛 5초 폴링 대비 wakeup 은 1/12 이고, 알림이 정상 배달되는 평시에는 재개가 **즉시**라
+    /// 오히려 빨라진다. 자격증명을 쓰는 경로는 이 감시와 무관하게 그 자리에서 다시 판정한다
+    /// (`externalAppBlocksSwitching()`).
     private func startExternalAppWatch() {
         guard externalAppWatchTimer == nil else { return }
-        externalAppWatchTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.externalAppWatchInterval, repeats: true
-        ) { [weak self] _ in
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification,
+                     NSWorkspace.didTerminateApplicationNotification] {
+            externalAppWatchObservers.append(
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                    // 값싼 사전 필터 — 시스템의 모든 앱 실행/종료마다 조회를 돌리지 않는다.
+                    let bundleID = (note.userInfo?[NSWorkspace.applicationUserInfoKey]
+                        as? NSRunningApplication)?.bundleIdentifier
+                    guard MobiusCoexistence.notificationConcernsMobius(bundleID: bundleID)
+                    else { return }
+                    Task { @MainActor in self?.reevaluateExternalApp() }
+                })
+        }
+        let timer = Timer(timeInterval: Self.externalAppWatchInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.reevaluateExternalApp() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        externalAppWatchTimer = timer
+    }
+
+    /// 감시를 통째로 걷는다 — 타이머와 구독은 **함께** 서고 함께 걷힌다. 한쪽만 남으면
+    /// "끄면 아무것도 안 돈다"가 성립하지 않는다(구독만 남으면 앱 실행/종료마다 재판정이 돈다).
+    private func stopExternalAppWatch() {
+        externalAppWatchTimer?.invalidate()
+        externalAppWatchTimer = nil
+        let center = NSWorkspace.shared.notificationCenter
+        for observer in externalAppWatchObservers { center.removeObserver(observer) }
+        externalAppWatchObservers.removeAll()
     }
 
     /// 지금 외부 Mobius.app 이 살아 있는지 다시 보고, 엔진의 가동 상태를 그 결과에 맞춘다.
@@ -451,8 +495,7 @@ final class AccountsState: ObservableObject {
     /// Task 필드 스윕이 그 함수를 본다.
     func stop() {
         wantsEngine = false
-        externalAppWatchTimer?.invalidate()
-        externalAppWatchTimer = nil
+        stopExternalAppWatch()
         // 기능 자체가 꺼졌으니 "막혀 있다" 안내도 내린다 — 남기면 꺼진 기능에 대한 배너가 된다.
         blockedByExternalApp = false
         stopEngine()
@@ -517,6 +560,10 @@ final class AccountsState: ObservableObject {
     /// 있어야 자동 재개가 성립한다(없으면 사용자가 앱을 재시작해야 복구된다).
     var externalAppWatchTimerForTesting: Timer? { externalAppWatchTimer }
 
+    /// 테스트 전용 — `NSWorkspace` 구독이 몇 개 살아 있는지. 감시의 **본체**가 구독이므로
+    /// 타이머만 보면 "이벤트 구동이 실제로 걸렸는지"도, "꺼질 때 함께 걷혔는지"도 못 본다.
+    var externalAppWatchObserverCountForTesting: Int { externalAppWatchObservers.count }
+
     /// 전환이 **실제로 성사된 뒤** 호출된다 — 자동(`apply`)·수동(`performSwitch`) 두 경로가
     /// 모두 지나며, 전환이 throw 하면 호출되지 않는다.
     ///
@@ -528,10 +575,12 @@ final class AccountsState: ObservableObject {
     /// 자격증명을 실제로 쓰는 경로의 공통 관문. 막혀 있으면 `true` 를 돌려주고 호출부는
     /// 아무것도 하지 않는다.
     ///
-    /// 캐시된 `blockedByExternalApp` 을 읽는 대신 **그 자리에서 다시 판정**하는 이유: 감시
-    /// 타이머는 5초 주기라 그 사이에 Mobius.app 이 뜨면 창이 열린다. 전환은 드문 이벤트이므로
-    /// 한 번 더 조회하는 비용이 무의미하고, 반대로 그 창에서 한 번만 겹쳐 써도 라이브 로그인이
-    /// **에러 없이** 오염된다(`MobiusCoexistence`).
+    /// 캐시된 `blockedByExternalApp` 을 읽는 대신 **그 자리에서 다시 판정**하는 이유: 감시는
+    /// 알림 배달(+60초 안전망)에 의존하므로 그 사이에 Mobius.app 이 뜨면 창이 열린다. 전환은
+    /// 드문 이벤트이므로 한 번 더 조회하는 비용이 무의미하고, 반대로 그 창에서 한 번만 겹쳐
+    /// 써도 라이브 로그인이 **에러 없이** 오염된다(`MobiusCoexistence`).
+    /// ★ 감시를 이벤트 구동으로 바꾼 뒤에도 이 재조회는 그대로 둔다 — 폴링 제거의 대가를
+    /// 여기서 흡수하기 때문이다(자격증명을 쓰는 순간만큼은 항상 최신 판정으로 간다).
     private func externalAppBlocksSwitching() -> Bool {
         reevaluateExternalApp()
         return blockedByExternalApp
@@ -1524,9 +1573,15 @@ final class AccountsState: ObservableObject {
         // ★ 같은 이유로 이중 writer 가드도 여기서 한 번 더 본다. 이 틱은 `preflightFallback`
         // 의 `await` 를 지나오는데, 그 사이에 Mobius.app 이 뜨면 위 취소 확인은 이미 통과한
         // 뒤다 — 확인을 입구에만 두면 "감지했는데도 한 번 더 전환한" 경우가 남는다.
+        // ★ 그 가드보다 **먼저** 빠져나간다. `externalAppBlocksSwitching()` 은 LaunchServices
+        // 조회(`NSRunningApplication`)를 돌리는데, 이 함수는 프로바이더마다 **매 틱** 불리므로
+        // 결정이 없는 평시에도 3초당 2회 조회가 상시로 깔린다 — 감시 폴링을 이벤트 구동으로
+        // 바꿔도 이쪽이 남으면 유휴 비용은 그대로다. 판정이 "아무것도 하지 않음"이면 자격증명도
+        // 알림도 건드리지 않으므로 가드가 지킬 것이 없다(가드는 **쓰기 직전**에만 의미가 있다).
+        if case .none = decision { return }
         guard !externalAppBlocksSwitching() else { return }
         switch decision {
-        case .none: break
+        case .none: break   // 위에서 이미 반환된다 — 전수성 유지용
         case .allExhausted:
             notify(title: l.accountsNotifyAllExhaustedTitle(provider.displayName),
                    body: l.accountsNotifyAllExhaustedBody)

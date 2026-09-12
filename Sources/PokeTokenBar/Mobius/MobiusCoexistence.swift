@@ -51,4 +51,15 @@ enum MobiusCoexistence {
     static func isExternalMobiusRunning() -> Bool {
         isBlocked(by: runningInstances())
     }
+
+    /// `NSWorkspace` 실행/종료 알림이 우리가 지켜보는 앱에 대한 것인가 — 시스템의 모든 앱
+    /// 실행·종료마다 LaunchServices 를 다시 조회하지 않기 위한 값싼 사전 필터다.
+    ///
+    /// ★ 번들 ID 를 못 읽으면 **보수적으로 참**이다. 이 필터가 틀리는 두 방향의 대가가 대칭이
+    /// 아니다 — 남의 앱 때문에 한 번 더 조회하는 비용은 무의미하지만, Mobius.app 알림을
+    /// 놓치면 두 앱이 같은 Keychain·`~/.claude.json` 을 스왑해 라이브 로그인이 **에러 없이**
+    /// 오염된다.
+    static func notificationConcernsMobius(bundleID: String?) -> Bool {
+        bundleID == nil || bundleID == mobiusBundleID
+    }
 }

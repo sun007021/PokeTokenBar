@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import MobiusCore
 @testable import PokeTokenBar
@@ -54,6 +55,18 @@ final class MobiusCoexistenceGuardTests: XCTestCase {
         }
     }
 
+    /// 값싼 사전 필터 — 시스템의 모든 앱 실행/종료마다 LaunchServices 를 다시 조회하지 않게
+    /// 한다. **모르면 조회한다**(번들 ID 를 못 읽은 알림)가 핵심이다: 한 번 더 조회하는 비용은
+    /// 무의미하지만 Mobius.app 알림을 놓치면 자격증명이 조용히 오염된다.
+    func testOnlyMobiusNotificationsAreWorthAQuery() {
+        XCTAssertTrue(MobiusCoexistence.notificationConcernsMobius(
+            bundleID: MobiusCoexistence.mobiusBundleID))
+        XCTAssertFalse(MobiusCoexistence.notificationConcernsMobius(
+            bundleID: "io.github.chattymin.poketokenbar"))
+        XCTAssertTrue(MobiusCoexistence.notificationConcernsMobius(bundleID: nil),
+                      "번들 ID 를 못 읽었으면 걸러내지 말고 다시 조회해야 한다")
+    }
+
     // MARK: - 엔진이 실제로 안 도는가
 
     func testStartInstallsNoEngineWhileMobiusIsRunning() throws {
@@ -75,9 +88,83 @@ final class MobiusCoexistenceGuardTests: XCTestCase {
             cleanupWith: self, externalMobiusRunning: { true })
         state.start()
 
+        XCTAssertEqual(state.externalAppWatchObserverCountForTesting, 2,
+                       "감시의 본체는 NSWorkspace 실행/종료 구독이다 — 없으면 재개가 안 온다")
         let watch = try XCTUnwrap(state.externalAppWatchTimerForTesting,
-                                  "감시 타이머가 없으면 Mobius.app 이 꺼져도 영영 못 살아난다")
+                                  "안전망까지 없으면 알림이 유실될 때 영영 못 살아난다")
         XCTAssertTrue(watch.isValid)
+    }
+
+    /// 이벤트 구동이 **실제로 배선됐는지** — 구독 개수만 세면 콜백이 아무것도 안 해도 통과한다.
+    /// 워크스페이스 알림을 직접 쏴서 엔진이 스스로 뜨는지 본다(폴링을 지운 뒤 자동 재개의
+    /// 유일한 평시 경로다).
+    func testTheEngineResumesOnTheWorkspaceTerminationNotification() async throws {
+        var mobiusRunning = true
+        let state = try MobiusTestSupport.isolatedAccountsState(
+            cleanupWith: self, externalMobiusRunning: { mobiusRunning })
+        state.start()
+        XCTAssertNil(state.tickTimerForTesting)
+
+        mobiusRunning = false
+        NSWorkspace.shared.notificationCenter.post(
+            name: NSWorkspace.didTerminateApplicationNotification, object: NSWorkspace.shared)
+
+        // 알림 콜백은 메인 큐로 **비동기** 배달된다 — 폴링이 아니라 배달을 기다린다.
+        try await Self.eventually("종료 알림을 받고도 엔진이 안 뜨면 사용자는 앱을 재시작해야 한다") {
+            state.tickTimerForTesting != nil
+        }
+        XCTAssertFalse(state.blockedByExternalApp)
+    }
+
+    /// 반대 방향 — 알림 한 번에 물러난다.
+    func testTheEngineStandsDownOnTheWorkspaceLaunchNotification() async throws {
+        var mobiusRunning = false
+        let state = try MobiusTestSupport.isolatedAccountsState(
+            cleanupWith: self, externalMobiusRunning: { mobiusRunning })
+        state.start()
+        let timer = try XCTUnwrap(state.tickTimerForTesting)
+
+        mobiusRunning = true
+        NSWorkspace.shared.notificationCenter.post(
+            name: NSWorkspace.didLaunchApplicationNotification, object: NSWorkspace.shared)
+
+        try await Self.eventually("실행 알림을 받고도 안 물러나면 두 앱이 같은 자격증명을 스왑한다") {
+            state.tickTimerForTesting == nil
+        }
+        XCTAssertTrue(state.blockedByExternalApp)
+        XCTAssertFalse(timer.isValid)
+    }
+
+    /// 평시 틱은 **조회하지 않는다.** 가드는 자격증명·알림을 건드리기 직전에만 의미가 있는데,
+    /// 그 자리가 프로바이더마다 매 틱 불리는 `apply` 입구라 결정이 없는 평시에도 3초당 2회
+    /// LaunchServices 왕복이 깔려 있었다 — 감시 폴링만 이벤트 구동으로 바꿔도 이쪽이 남으면
+    /// 유휴 비용은 그대로다. (가드 자체는 위 테스트들이 지킨다.)
+    func testAnIdleTickDoesNotQueryForTheExternalApp() async throws {
+        var queries = 0
+        let state = try MobiusTestSupport.isolatedAccountsState(
+            cleanupWith: self, externalMobiusRunning: { queries += 1; return false })
+        state.start()
+        await state.tickTaskForTesting?.value
+        let afterStart = queries
+        XCTAssertGreaterThan(afterStart, 0, "시작 시 1회는 봐야 한다 — 알림은 변화만 준다")
+
+        await state.tick()
+
+        XCTAssertEqual(queries, afterStart,
+                       "결정이 없는 틱이 조회를 돌리면 유휴 상태에서 3초마다 LaunchServices 왕복이 깔린다")
+    }
+
+    /// 비동기 배달을 기다리는 최소 헬퍼 — 고정 대기(`sleep`)는 느린 머신에서 플레이키해지고
+    /// 빠른 머신에서는 스위트를 괜히 늘린다.
+    private static func eventually(_ message: String,
+                                   timeout: TimeInterval = 5,
+                                   _ condition: @MainActor () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await MainActor.run(body: condition) { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail(message)
     }
 
     /// 자동 재개 — 감시가 다음번에 보는 값이 바뀌면 엔진이 뜬다. 타이머의 5초를 기다리는 대신
@@ -128,6 +215,8 @@ final class MobiusCoexistenceGuardTests: XCTestCase {
         state.stop()
         XCTAssertNil(state.externalAppWatchTimerForTesting)
         XCTAssertFalse(watch.isValid)
+        XCTAssertEqual(state.externalAppWatchObserverCountForTesting, 0,
+                       "구독이 남으면 앱 실행/종료마다 꺼진 기능의 재판정이 계속 돈다")
         XCTAssertFalse(state.blockedByExternalApp, "꺼진 기능에 대한 '막혔어요' 안내는 거짓말이다")
     }
 
