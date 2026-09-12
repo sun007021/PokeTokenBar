@@ -1,6 +1,11 @@
 MIT License
 
 Copyright (c) 2026 chattymin
+Copyright (c) 2026 Mobius Contributors (Sources/MobiusCore, Tests/MobiusCoreTests)
+Copyright (c) 2026 Sunwook Lee (this fork's modifications)
+
+See THIRD_PARTY_NOTICES.md for the origin of each notice above and their
+individually-attributed source verbatim.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
