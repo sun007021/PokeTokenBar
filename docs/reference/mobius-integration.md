@@ -29,6 +29,39 @@ ja/es/fr/pt/de 슬롯에는 en 값을 그대로 넣는다.** 그 언어 사용�
 - **7개 언어 레이아웃 테스트는 유지한다.** en 이 들어간 슬롯은 en 폭으로 측정될 뿐이고, 나중에 진짜
   번역이 들어올 때 폭 회귀를 잡아 준다. 테스트를 ko/en 만 도는 것으로 축소하지 마라.
 
+`L.koEn(ko:en:)`(private) 이 en 을 5개 슬롯에 복제한다. 규칙이 지켜지는지는
+`AccountsLocalizationTests` 가 양방향으로 잠근다 — 새 항목은 ja/es/fr/pt/de 가 en 과 같아야 하고,
+이미 7개 언어가 든 기존 항목은 en 과 **달라야** 한다(되돌림 방지).
+
+### 비-UI 계층에서 `L` 얻기
+
+이 기능의 문구 대부분은 뷰가 아니라 `AccountsState`(알림·배너)에서 만들어진다. 뷰의
+`companion.l` 에 닿을 수 없으므로 **언어 미러**를 둔다 — `UsageStore.localizationLanguage` 와
+같은 관례다.
+
+| 자리 | 규칙 |
+|---|---|
+| 보관 | `AccountsState.localizationLanguage`(기본 `.systemDefault`), 접근자 `private var l: L` |
+| 시드 | `AppDelegate.applicationDidFinishLaunching` — `store.localizationLanguage` 바로 옆 |
+| 갱신 | `SettingsView` 언어 픽커 setter. **빠뜨리면 언어를 바꿔도 알림·배너만 옛 언어로 남는다** |
+
+★ **`AccountsState.init` 의 두 문구(로드 실패·프로바이더 복구)만 시스템 언어로 렌더된다** —
+`MobiusLaunchSequence` 가 `AccountsState` 를 `CompanionStore` 보다 **먼저** 만들고(그 순서는 데이터
+보존이라 못 바꾼다) init 은 자기 저장 프로퍼티를 읽을 수도 없다. 손상된 `accounts.json` 에서만
+나오는 문구이고, 사용자가 앱 언어를 시스템과 다르게 고른 경우에만 어긋난다 —
+`UsageStore` 가 같은 미러에서 감수한 것과 같은 틈이다.
+
+★ **`LoginFlowError`·`DesktopCoordinatorError` 는 `LocalizedError` 가 아니다.**
+`errorDescription` 은 언어를 받을 수 없기 때문이다. 사용자 문구는 `L.accountsErrorMessage(_:)` 가
+만들고(`SaveTransferError` 와 같은 구조), 그래서 이 에러를 **표시하는 자리는 반드시 그 매핑을
+거쳐야 한다** — 그냥 `localizedDescription` 을 쓰면 "The operation couldn't be completed…" 가 그대로
+노출되는 조용한 품질 저하가 된다. 회귀 가드는 `AccountsLocalizationTests`.
+
+★ **한글 리터럴 검사가 `Sources/PokeTokenBar/Mobius/` 까지 훑는다**
+(`LocalizedUILiteralTests`). 이 계층은 뷰가 아니라 새 문구를 더할 때 `companion.l` 이 눈앞에 없어
+리터럴로 되돌아가기 쉽다. 진단 로그(`AppLog.write`/`NSLog`)는 사용자 노출이 아니라 제외하되,
+**리터럴이 하나뿐인 줄에서만** 건너뛴다 — 로그와 표시 문구가 한 줄에 섞이면 검사한다.
+
 ## 왜 이식이 싼가
 
 `Sources/MobiusCore/` 는 **사용자 노출 문자열이 0개**다(한글은 전부 주석). 의존성은
@@ -132,9 +165,11 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
       틱을 멈추면 소진돼도 전환이 안 되고 사용자는 막힌 CLI 로 돌아온다. 쓴다면 **시스템** 슬립
       (`NSWorkspace.willSleepNotification`/`didWakeNotification`)이어야 하고, 깨어날 때 즉시 1틱을
       돌리는 경로가 함께 필요하다)
-- [ ] **Phase 7 — 다국어**: `MobiusStrings.loc()` 경유 60개를 `L` 로 이관(lproj·`Bundle.module` 금지).
-      이관 대상은 `Sources/PokeTokenBar/Mobius/MobiusStrings.swift` 의 `loc(_:)`/`loc(_:_:)` —
-      Phase 3 이 만든 임시 경유지로, 지금은 키(한국어 원문)를 그대로 돌려준다
+- [ ] **Phase 7 — 다국어**: 계정 전환 문구 65개를 `L` 로 이관 완료(lproj·`Bundle.module` 금지).
+      Phase 3 이 만든 임시 경유지 `Sources/PokeTokenBar/Mobius/MobiusStrings.swift` 는
+      호출부가 사라져 **삭제**했다. 항목은 `Localization.swift` 의 `accountsNotify*`(알림)·
+      `accountsError*`(배너·실패 사유·에러 매핑) 접두사로 모여 있고, 비-UI 계층이 `L` 을 얻는
+      방법은 아래 §다국어 규칙 참조
 - [ ] **Phase 8 — 게이트·빌드**: `test-gate.sh` 화이트리스트 갱신, 고정 서명 인증서, `/Applications` 설치
 
 ## 앱 시작 순서 (`MobiusLaunchSequence`)
