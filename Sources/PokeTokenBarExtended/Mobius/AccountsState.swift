@@ -1771,8 +1771,11 @@ final class AccountsState: ObservableObject {
                 lastError = l.accountsErrorAutoSwitchFailed(error.localizedDescription)
                 return
             }
-            // Desktop 자동 Fallback (Claude 전용): 옵션 켬 + 대상 스냅샷 존재 시에만
-            if provider == .claude, store.file.desktopAutoSwitchEnabled {
+            // Desktop 자동 Fallback (Claude 전용): 옵션 켬 + 대상 스냅샷 존재 시에만.
+            // ★ `MobiusFeature.desktopSyncInScope` 가 먼저 온다 — 1차 범위 밖 기능이라 저장된
+            // `desktopAutoSwitchEnabled` 값과 무관하게 막는다(`MobiusFeature.swift` 참조).
+            if MobiusFeature.desktopSyncInScope, provider == .claude,
+               store.file.desktopAutoSwitchEnabled {
                 switchDesktopIfPossible(from: fromID, to: id)
             }
         }
@@ -1836,8 +1839,12 @@ final class AccountsState: ObservableObject {
             lastError = l.accountsErrorSwitchFailed(error.localizedDescription)
             return
         }
-        // Desktop 동시 전환 (Claude 전용 — 옵션 켜짐 + 대상 스냅샷 존재 시)
-        if provider == .claude, store.file.desktopSyncEnabled {
+        // Desktop 동시 전환 (Claude 전용 — 옵션 켜짐 + 대상 스냅샷 존재 시).
+        // ★ `MobiusFeature.desktopSyncInScope` 가 먼저 온다 — 1차 범위 밖 기능이라 저장된
+        // `desktopSyncEnabled` 값과 무관하게 막는다. 이 값은 지속화 필드 기본값이 **`true`**
+        // 라 기존 accounts.json 에 이미 `true` 로 저장돼 있을 수 있다(실측, `MobiusFeature.swift`
+        // 참조) — 저장값에 의존하지 않아야 그 파일에서도 안전하다.
+        if MobiusFeature.desktopSyncInScope, provider == .claude, store.file.desktopSyncEnabled {
             switchDesktopIfPossible(from: fromID, to: id)
         }
     }
@@ -1845,8 +1852,15 @@ final class AccountsState: ObservableObject {
     /// 진행 중인 Desktop 전환 태스크 — 자동/수동 어느 경로든 하나만 허용.
     private var desktopSwitchTask: Task<Void, Never>?
 
+    /// 테스트 전용 — `switchDesktopIfPossible` 진입 횟수. 실제 Desktop 조작(`DesktopCoordinator`)
+    /// 은 실물 `NSRunningApplication`/`com.anthropic.claudefordesktop` 을 건드리므로 테스트에서
+    /// 절대 실행하고 싶지 않다 — 이 함수 **진입 여부**만으로 `MobiusFeature.desktopSyncInScope`
+    /// 게이트가 호출부를 막는지 확인한다(`DesktopSyncScopeTests`).
+    private(set) var desktopSwitchAttemptsForTesting = 0
+
     /// CLI 전환 성공 후 Desktop 동반 전환. 실패해도 CLI 전환은 유지된다.
     private func switchDesktopIfPossible(from fromID: UUID?, to id: UUID) {
+        desktopSwitchAttemptsForTesting += 1
         guard let fromID, fromID != id,
               desktopCapture == nil else { return } // 가이드 캡처 중엔 Desktop을 건드리지 않음
         // 대상이 캡처됐으면 복원, 미캡처지만 Desktop이 로그인돼 있으면 로그아웃한다.

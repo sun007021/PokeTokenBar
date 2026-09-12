@@ -8,7 +8,10 @@ enum DesktopCoordinatorError: Error {
 }
 
 /// Desktop 앱의 종료 → 스왑 → 재실행 시퀀스.
-/// 수동 전환(desktopSyncEnabled) 및 자동 전환(desktopAutoSwitchEnabled 켬)에서 호출된다.
+/// 수동 전환(desktopSyncEnabled) 및 자동 전환(desktopAutoSwitchEnabled 켬)에서 호출**될 수 있는**
+/// 경로지만, 1차 범위 밖 기능이라 호출부(`AccountsState.performSwitch`/`apply`)가
+/// `MobiusFeature.desktopSyncInScope`(현재 `false`)로 미리 막고 있다 — 이 타입 자체는 그 게이트를
+/// 모른다. 되살릴 때 참고: `MobiusFeature.swift`, `docs/reference/mobius-integration.md`.
 @MainActor
 final class DesktopCoordinator {
     static let bundleID = "com.anthropic.claudefordesktop" // Task 16 Step 1 실측 확인 (2026-07-10)

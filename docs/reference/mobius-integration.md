@@ -521,9 +521,81 @@ UserDefaults 도메인은 건드리지 않는다.
   `~/.claude/projects` · `~/.codex/sessions` 트리를 각자 훑는다. v1 은 각자 캐시·오프셋으로 공존하고,
   Phase 3 에서 유휴 CPU 를 실측해 기준선 대비 +0.5%p 를 넘으면 통합을 앞당긴다.
 - **Desktop 동시 전환 코드는 남되 UI 미노출**: `performSwitch`/`reload` 에 얽혀 있어 제거 수술이
-  오히려 회귀 위험이다. 토글 기본 off 로 잠재운다.
+  오히려 회귀 위험이다. ★ **[2026-09-12 정정]** 이 항목은 원래 "토글 기본 off 로 잠재운다"고
+  적혀 있었는데 **거짓이었다** — 실제 게이트는 `MobiusFeature.desktopSyncInScope`(상수, 아래
+  결함 참조)다. 자세한 내용과 왜 "토글 기본 off"가 이 기능에는 통하지 않았는지는 바로 아래
+  §Desktop 동시 전환이 "UI 미노출"만으로는 안 잠들어 있었던 결함 참조.
 - **두 앱 병행 실행 금지**: Keychain·`~/.claude.json` 은 전역 자원이라 Mobius.app 과 이 앱이 동시에
   스왑하면 자격증명이 오염된다. Phase 6 의 실행 감지 가드가 이를 막는다(아래 '이중 writer 가드').
+
+## Desktop 동시 전환이 "UI 미노출"만으로는 안 잠들어 있었던 결함 (2026-09-12)
+
+**증상**: 사용자가 계정 카드를 눌러 **수동** Claude 전환을 하면 Claude Desktop 이 **경고 없이
+종료되고 로그아웃**됐다. 되돌릴 UI도 없었다.
+
+**연쇄**:
+1. `MobiusCore/Models.swift` 의 `AccountsFile.init` 기본값 `desktopSyncEnabled: Bool = true` —
+   Mobius 본체가 그렇게 설계했다(이 포크의 결정이 아니다). `AccountStore.init(env:keychain:)` 는
+   디스크에 accounts.json 이 없으면 `AccountsFile()` 을 그대로 쓰므로, **이 값을 한 번도 만진 적
+   없는 사용자도** 이미 `desktopSyncEnabled == true` 다.
+2. `AccountsState.performSwitch`(수동 전환)와 `apply`(자동 전환)가 저장된
+   `desktopSyncEnabled`/`desktopAutoSwitchEnabled` 만 보고 `switchDesktopIfPossible` 을 불렀다 —
+   "1차 범위 밖"이라는 범위 결정이 코드에는 전혀 반영돼 있지 않았다.
+3. `setDesktopSync(_:)`/`setDesktopAutoSwitch(_:)` 는 **어떤 View 에서도 호출되지 않는다**(전수
+   grep 으로 확인) — 즉 "UI 를 안 붙였다"가 곧 "꺼진 채로 잠들었다"라는 원래 가정은 **이 필드가
+   `true` 로 시작하는 순간 성립하지 않는다.** 꺼진 채로 잠드는 건 **기본값이 꺼짐인** 기능뿐이고
+   (`desktopAutoSwitchEnabled` 는 기본 `false` 라 실제로 무해했다), 기본값이 켬인 기능은 UI가
+   없으면 오히려 **끌 방법이 없어진다.**
+4. 실측(이 저장소 사용자의 실제 파일, 읽기 전용으로 확인): `~/Library/Application Support/
+   PokeTokenBarExtended/mobius/accounts.json` 에 `desktopSyncEnabled: true` 가 이미 저장돼 있었고,
+   `desktop-profiles/`(Desktop 스냅샷) 디렉터리는 존재하지 않았다 — 이 조합이
+   `switchDesktopIfPossible` 의 "미캡처 대상으로의 전환" 분기를 타서 `DesktopCoordinator.
+   switchDesktop` 이 실행 중이던 Claude Desktop 을 종료 + 로그아웃시킨다(§Keychain 이 아니라
+   §hasLiveLogin — 신원 파일 제거이므로 실제 로그아웃이 맞다).
+
+**근본원인 (5-whys)**: "1차 범위 밖 = UI 미노출"이라는 범위 결정을, 코드에는 "UI 콜백이 없다"로만
+반영했다. 이 기능은 **기본값이 켬**인 지속화 필드로 게이트되므로, UI 부재는 아무 방어도 아니었다 —
+오히려 사용자가 그 값을 되돌릴 방법을 없앴을 뿐이다. 테스트가 이를 못 걸러낸 이유: 기존
+`MobiusCoexistenceGuardTests`류 회귀 테스트는 이중 writer 가드처럼 **명시적으로 설계된** 게이트만
+검증했고, "범위 결정이 실제로 코드에 반영됐는가"를 확인하는 테스트가 없었다.
+
+**수정**: `MobiusFeature.desktopSyncInScope`(상수, 현재 `false`) 를 `performSwitch`/`apply` 양쪽
+호출부의 **첫 조건**으로 추가했다 — 저장된 값·기본값과 완전히 무관하게 호출부 자체를 막는다.
+- **왜 기본값을 바꾸거나 마이그레이션으로 끄지 않았나**: 이미 디스크에 `true` 로 저장된 파일은
+  기본값을 바꿔도 안 꺼진다(디코더가 저장값을 우선한다). 마이그레이션(1회 강제 `false` 쓰기)도
+  고려했지만, 그러면 나중에 이 기능을 UI 와 함께 노출할 때 "마이그레이션이 사용자의 이전 선택을
+  지웠다"는 새 문제가 생긴다. 호출부 게이트는 저장값을 **건드리지 않고 무시**하므로 나중에
+  상수만 지우면 저장값이 그대로 되살아난다 — 되돌릴 지점이 한 곳(`MobiusFeature.swift`)으로
+  분명하다.
+- **코드는 지우지 않았다** — `DesktopCoordinator`/`DesktopSwitcher`/`switchDesktopIfPossible` 은
+  그대로 남아 있다. 이 기능을 나중에 UI 와 함께 노출하려면 `MobiusFeature.desktopSyncInScope` 를
+  지우고(또는 `true` 로 바꾸고) 그 옆에 실제 켬/끔 UI(`setDesktopSync`/`setDesktopAutoSwitch` 를
+  부르는 뷰)를 **반드시 함께** 넣을 것 — 이번 결함이 증명하듯 하나만 하면 재발한다.
+
+**부류 스윕 (§결정 사항의 1차 범위 제외 항목이 실제로도 잠들어 있는지)**:
+
+| 제외 항목 | 실제 상태 | 근거 |
+|---|---|---|
+| Desktop 동시 전환 | ✗ 안 잠들어 있었음(본 결함) | 위 내용 |
+| 멀티 Mac 동기화(`SyncEngine`) | ✓ 잠들어 있음 | `SyncEngine(` 생성자 호출이 `Sources/PokeTokenBarExtended/` 전체에 0건 — 타입만 이식되고 아무도 안 씀 |
+| 실험실(`labsIndent` 등) | ✓ 잠들어 있음(애초에 없음) | 이 포크 UI에 "실험실" 탭·섹션 자체가 없다 — `AccountSwitchingSettingsSection.swift` 헤더 주석의 "범위 밖" 목록일 뿐, 대응하는 뷰가 없다 |
+| Mobius 자체 업데이트 확인(`MobiusCore.UpdateChecker`) | ✓ 잠들어 있음 | `PokeTokenBarExtendedApp.swift` 가 만드는 `UpdateChecker` 는 `Sources/PokeTokenBarExtended/Core/UpdateChecker.swift`(호스트 앱 자신의 업데이트 확인기, PokeTokenBar 상류용)다 — `MobiusCore.UpdateChecker` 를 생성하는 코드는 전수 grep 으로 0건 |
+| advisory(임계값 선제 전환) | (해당 없음 — 범위 밖 목록에 없음) | `mobius-integration.md` §결정 사항은 advisory 를 제외하지 않는다. Phase 5 가 실제로 설정 UI(`AccountSwitchingSettingsSection.swift`)를 붙여 놨고 기본값도 꺼짐이라 이 결함의 부류가 아니다 |
+
+**차이의 원인**: Desktop 동시 전환만 다른 셋과 달랐던 이유는 정확히 "지속화 필드의 기본값이
+켬이면서 호출부가 그 필드를 직접 읽는다"는 조합 때문이다. `SyncEngine`/`UpdateChecker` 는 **호출
+자체가 없어서**(설령 기본값이 켬이어도 아무도 안 부르면 무해), 실험실은 **UI 자체가 없어서**(설정
+저장은 됐어도 사용자가 값을 바꿀 창구가 없다는 것과 별개로 코드 경로가 원천적으로 없음),
+advisory 는 **기본값이 꺼짐이라서** 각각 안전했다. 이 조합(기본 켬 + 호출부가 직접 읽음 + UI
+없음) 자체를 새 기능에 반복하지 않는 것이 재발 방지다.
+
+**회귀 테스트**: `Tests/PokeTokenBarExtendedTests/DesktopSyncScopeTests.swift`.
+`desktopSwitchAttemptsForTesting`(테스트 전용 카운터, `switchDesktopIfPossible` 최상단에서
+증가)로 그 함수가 **진입조차 안 하는지**를 확인한다 — `DesktopCoordinator` 는 실물
+`com.anthropic.claudefordesktop` 번들을 `NSRunningApplication` 으로 건드리므로, 이 테스트는
+실제로 그 경로를 태우지 않고 진입 여부만으로 게이트를 증명한다. `testManualSwitchDoesNotAttempt
+DesktopSyncWithTheDefaultStoredValue` 가 정확히 이 결함의 재현 조건(디스크에 아무것도 없는 새
+`AccountStore` 조차 `desktopSyncEnabled == true`)을 검증한다.
 
 ## 이중 writer 가드 (Phase 6)
 
