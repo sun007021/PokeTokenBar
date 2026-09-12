@@ -183,6 +183,9 @@ final class AccountsState: ObservableObject {
     lazy var desktopSwitcher = DesktopSwitcher(env: env)
     lazy var desktopCoordinator = DesktopCoordinator(switcher: desktopSwitcher)
     private var timer: Timer?
+    /// 진행 중인 틱 — `stop()` 이 취소할 수 있도록 핸들을 들고 있는다. 타이머만 걷으면
+    /// "다음 틱이 안 생긴다"까지만 보장되고, **이미 떠 있는 틱은 자동 전환까지 끝까지 간다.**
+    private var tickTask: Task<Void, Never>?
     private var observer: NSObjectProtocol?
     private var lastReconcileAt = Date.distantPast
     private var lastActiveSnapshotSyncAt = Date.distantPast
@@ -336,14 +339,46 @@ final class AccountsState: ObservableObject {
         // 3초 주기: 로그 스캔 → 자동 전환 판단 (빠른 fallback). reconcile/adopt는 내부에서
         // 15초로 게이팅해 Keychain 접근·라이브 추종 바운스를 늘리지 않는다.
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.tick() }
+            Task { @MainActor in self?.scheduleTick() }
         }
-        Task { @MainActor in await tick() }
+        scheduleTick()
+    }
+
+    /// 틱 하나를 띄우고 **핸들을 보관**한다 — `stop()` 이 취소할 대상이기 때문이다.
+    /// 앞 틱이 살아 있으면 새로 띄우지 않는다(`tickInFlight` 와 같은 뜻이지만, 이쪽이 보장하는
+    /// 것은 "핸들이 늘 하나"다 — 두 개가 되면 `stop()` 이 그중 하나만 취소하게 된다).
+    /// 핸들은 취소 시점이 아니라 **틱이 실제로 끝날 때** 비운다: `stop()` 직후 `start()` 가
+    /// 와도 죽어가는 틱의 `defer` 가 새 핸들을 덮어쓰지 못한다.
+    private func scheduleTick() {
+        guard tickTask == nil else { return }
+        tickTask = Task { @MainActor in
+            defer { tickTask = nil }
+            await tick()
+        }
     }
 
     /// 주기 처리를 멈춘다 — 기능 토글 off, 디스플레이 슬립 등에서 호출한다.
-    /// 진행 중인 틱은 자기 가드(tickInFlight)로 스스로 끝나고, 다음 틱은 생기지 않는다.
     /// 스토어·엔진 상태는 그대로 두므로 `start()`로 언제든 재개할 수 있다.
+    ///
+    /// ★ 타이머·옵저버만 걷으면 "끄면 아무것도 안 돈다"가 **성립하지 않는다**. `start()` 는
+    /// 마지막 줄에서 곧바로 한 틱을 띄우고, 그 틱은 게이트를 지나 자동 전환까지 수행한다 —
+    /// 즉 사용자가 방금 끈 기능이 계정을 바꿀 수 있다. 게이지 조회(`usageTask`·
+    /// `codexUsageTask`)와 폴백 로컬 검증(`fallbackLocalTask`)도 진행 중이면 그대로 남는다.
+    /// 그래서 타이머와 함께 **진행 중인 작업도 취소**한다.
+    ///
+    /// 취소가 안전한 이유(자격증명 원자성): 취소는 `await` 지점에서만 듣는데, 자격증명을
+    /// 쓰는 구간은 전부 **동기**이거나(`switcher.switchTo`, `store.withCredentialLock` 블록)
+    /// 취소가 전파되지 않는 `Task {}` 쉴드 안에 있다(`FallbackAuthChecker.inFlight`,
+    /// `CodexTokenRefresher` 호출부). 회전된 refresh 토큰을 서버가 소비한 뒤 저장 전에 끊겨
+    /// 계정이 벽돌이 되는 경로는 그래서 존재하지 않는다.
+    ///
+    /// 취소하지 **않는** 것(의도적):
+    ///  - `desktopSwitchTask` — Desktop 종료 → 프로필 스왑 → 재실행의 중간에서 끊으면 Desktop
+    ///    자격증명이 반쯤 옮겨진 채 남고 앱은 안 뜬다. 짧고 스스로 끝나므로 그대로 둔다.
+    ///  - `desktopCaptureTask` — 사용자가 연 가이드 캡처. 이미 **원래 Desktop 로그인을 치워
+    ///    둔(stash)** 상태이고 되돌리는 경로는 `endDesktopCapture()` 하나뿐이라, 여기서 취소만
+    ///    하면 사용자의 Desktop 로그인이 로그아웃된 채 남는다.
+    ///  - `start()` 의 Keychain 워밍업(`Task.detached`) — 취소 지점이 없는 동기 읽기 1회다.
     func stop() {
         timer?.invalidate()
         timer = nil
@@ -351,7 +386,20 @@ final class AccountsState: ObservableObject {
             DistributedNotificationCenter.default().removeObserver(observer)
             self.observer = nil
         }
+        // 핸들을 nil로 만들지 않는다 — 각 태스크의 `defer` 가 **실제로 끝날 때** 비운다.
+        // 여기서 비우면 아직 살아 있는 태스크가 참조를 잃어, 곧이은 `start()` 가 두 번째
+        // 핸들을 만들 수 있다(다음 `stop()` 이 그중 하나만 취소하게 된다).
+        tickTask?.cancel()
+        usageTask?.cancel()
+        codexUsageTask?.cancel()
+        fallbackLocalTask?.cancel()
+        desktopAutoCaptureTask?.cancel()
     }
+
+    /// 테스트 전용 — `start()` 가 곧바로 띄우는 틱의 핸들. 취소됐는지(`isCancelled`)와
+    /// 실제로 끝나는지(`await value`)를 둘 다 봐야 "stop()이 진행 중인 작업을 걷었다"가
+    /// 증명된다. 타이머와 달리 이건 **이미 돌고 있는** 작업이라 무효화만으로는 안 멈춘다.
+    var tickTaskForTesting: Task<Void, Never>? { tickTask }
 
     /// 팝오버가 열릴 때 호출 — 캐시가 만료된 계정만 사용량 조회 (상시 폴링 없음)
     func refreshUsageIfStale() {
@@ -720,6 +768,10 @@ final class AccountsState: ObservableObject {
         // 건너뛴 틱은 유실이 아니다 — 내부 작업은 전부 "마지막 실행 시각" 기준 게이트라
         // 다음 틱에서 이어서 처리된다.
         guard !tickInFlight else { return }
+        // ★ `stop()` 이 취소한 틱은 여기서 스스로 물러난다. 취소는 **실행을 막지 못한다** —
+        // 이미 큐에 오른 태스크는 취소돼도 몸체를 그대로 돌기 시작하므로, 직접 확인해야
+        // "껐는데 마지막 틱이 계정을 바꿨다"가 안 생긴다. 틱 도중의 취소는 `apply` 가 막는다.
+        guard !Task.isCancelled else { return }
         tickInFlight = true
         defer { tickInFlight = false }
         // 오래된 푸터 에러 자동 소거 (TTL 5분)
@@ -1329,6 +1381,12 @@ final class AccountsState: ObservableObject {
     }
 
     private func apply(_ decision: Decision, provider: Provider, now: Date) async {
+        // ★ 취소된 틱은 결정을 **적용하지 않는다.** 이 함수가 자동 전환(자격증명 스왑)과 그
+        // 알림의 유일한 관문이라, 여기 한 줄이 "기능을 끈 뒤엔 자동으로 계정이 안 바뀐다"를
+        // 전부 덮는다(수동 전환은 `performSwitch` 로 따로 가므로 영향받지 않는다).
+        // 취소는 `await` 지점에서만 들리는데 틱에는 그 지점이 여럿이다 — 스캔·usage 조회를
+        // 지나 여기 도착했을 때는 이미 `stop()` 이 끝나 있을 수 있다.
+        guard !Task.isCancelled else { return }
         switch decision {
         case .none: break
         case .allExhausted:

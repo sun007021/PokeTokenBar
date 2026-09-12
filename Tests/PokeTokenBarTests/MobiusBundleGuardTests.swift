@@ -17,17 +17,9 @@ final class MobiusBundleGuardTests: XCTestCase {
     /// Every path is synthetic, and `localUser` is a name no keychain item carries,
     /// so the credential warm-up inside `start()` resolves to "item not found"
     /// (`security … -a <bogus>` exits 44) instead of reading the real login.
+    /// Lifted to `MobiusTestSupport` once a second suite needed the same guarantee.
     private func isolatedState() throws -> AccountsState {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PokeTokenBar-MobiusBundleGuardTests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
-        let env = MobiusEnvironment(
-            home: root.appendingPathComponent("home"),
-            localUser: "poketokenbar-bundle-guard-\(UUID().uuidString)",
-            codexHome: root.appendingPathComponent("codex"),
-            appSupportDirOverride: root.appendingPathComponent("state"))
-        return AccountsState(env: env)
+        try MobiusTestSupport.isolatedAccountsState(cleanupWith: self)
     }
 
     func testAppEnvReportsThisProcessAsUnbundled() {
