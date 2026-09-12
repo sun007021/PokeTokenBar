@@ -1,12 +1,13 @@
 ---
-summary: Mobius(Claude·Codex 계정 전환) 기능을 PokeTokenBar 에 통합하는 작업의 설계·단계·불변식.
+summary: Mobius(Claude·Codex 계정 전환) 기능을 PokeTokenBarExtended 에 통합하는 작업의 설계·단계·불변식.
 read_when: mobius 통합 관련 코드를 만질 때, 상류(chattymin/PokeTokenBar) 변경을 rebase 할 때, 계정 전환·자격증명 경로를 리뷰할 때
 ---
 
 # Mobius 통합 계획
 
 이 포크는 [chussum/mobius](https://github.com/chussum/mobius) 의 Claude·Codex **계정 자동 전환**
-기능을 PokeTokenBar 에 합친다. 기존 PokeTokenBar 기능은 전부 그대로 유지한다.
+기능을 이 앱(상류 PokeTokenBar 의 포크, 개명 후 **PokeTokenBarExtended**)에 합친다.
+기존 PokeTokenBar 기능은 전부 그대로 유지한다.
 
 ## 결정 사항 (확정)
 
@@ -14,7 +15,7 @@ read_when: mobius 통합 관련 코드를 만질 때, 상류(chattymin/PokeToken
 |---|---|---|
 | 산출물 | 개인 포크 (상류 PR 아님) | 상류는 "읽기 전용 관찰자" 성격이라 자격증명 변경 기능은 별도 합의가 필요 |
 | 1차 범위 | 핵심 전환만 | 계정 목록·수동/자동 전환·게이지·로그인. Desktop 동시 전환/멀티 Mac 동기화 UI 제외 |
-| 데이터 경로 | `~/Library/Application Support/PokeTokenBar/mobius/` | 두 앱 병행 시 파일 경합 방지. 기존 Mobius 데이터는 1회 복사 마이그레이션 |
+| 데이터 경로 | `~/Library/Application Support/PokeTokenBarExtended/mobius/` | 두 앱 병행 시 파일 경합 방지. 기존 Mobius 데이터는 1회 복사 마이그레이션 |
 | 다국어 | **ko·en 만 번역**, 나머지 5개 슬롯은 en 값 | 개인 포크라 상류 기여 계획이 없다(사용자 결정 2026-09-12) |
 
 ### 다국어 규칙 (계정 전환 기능 한정)
@@ -57,7 +58,7 @@ ja/es/fr/pt/de 슬롯에는 en 값을 그대로 넣는다.** 그 언어 사용�
 거쳐야 한다** — 그냥 `localizedDescription` 을 쓰면 "The operation couldn't be completed…" 가 그대로
 노출되는 조용한 품질 저하가 된다. 회귀 가드는 `AccountsLocalizationTests`.
 
-★ **한글 리터럴 검사가 `Sources/PokeTokenBar/Mobius/` 까지 훑는다**
+★ **한글 리터럴 검사가 `Sources/PokeTokenBarExtended/Mobius/` 까지 훑는다**
 (`LocalizedUILiteralTests`). 이 계층은 뷰가 아니라 새 문구를 더할 때 `companion.l` 이 눈앞에 없어
 리터럴로 되돌아가기 쉽다. 진단 로그(`AppLog.write`/`NSLog`)는 사용자 노출이 아니라 제외하되,
 **리터럴이 하나뿐인 줄에서만** 건너뛴다 — 로그와 표시 문구가 한 줄에 섞이면 검사한다.
@@ -74,26 +75,128 @@ Mobius 코드는 격리한다:
 
 ```
 Sources/MobiusCore/              # 통째 복사. 수정 1곳(appSupport 주입)만 허용
-Sources/PokeTokenBar/Mobius/     # AccountsState, LoginFlow, 마이그레이션, 계정 UI
+Sources/PokeTokenBarExtended/Mobius/     # AccountsState, LoginFlow, 마이그레이션, 계정 UI
 Tests/MobiusCoreTests/           # 통째 복사, 무수정
 ```
 
 기존 파일 수정은 **4곳으로 제한**한다 — `Package.swift`, `UI/PopoverView.swift`(탭 추가),
-`UI/SettingsView.swift`(섹션 1개), `PokeTokenBarApp.swift`(상태 생성·수명주기). 이 경계를 넘는
+`UI/SettingsView.swift`(섹션 1개), `PokeTokenBarExtendedApp.swift`(상태 생성·수명주기). 이 경계를 넘는
 변경은 rebase 충돌 비용으로 되돌아온다.
 
 ## 데이터 보존 불변식 (깨지면 사용자 진행이 사라진 것처럼 보인다)
 
-1. **번들 ID `io.github.chattymin.poketokenbar` 와 앱 이름 `PokeTokenBar` 를 바꾸지 않는다.**
-   바꾸면 Application Support 디렉터리와 UserDefaults 도메인이 통째로 갈린다(파일은 남지만
-   사용자에겐 "데이터가 날아갔다"로 보인다).
+1. **앱 이름·번들 ID 를 바꾸면 데이터가 두 갈래로 갈린다 — 바꿀 때는 이전을 함께 낸다.**
+   Application Support 디렉터리(도감·사용량 캐시·스프라이트·계정)와 UserDefaults 도메인(설정)이
+   통째로 갈린다. 파일은 디스크에 남지만 사용자에겐 "데이터가 날아갔다"로 보인다.
+   2026-09-12 에 실제로 바꿨다(`PokeTokenBar` → `PokeTokenBarExtended`,
+   `io.github.chattymin.poketokenbar` → `io.github.sun007021.poketokenbarextended`) —
+   아래 §개명과 데이터 이전.
 2. `AppStatePaths.directory()` · `companion-state.json` · `CompanionState` 스키마에 손대지 않는다.
    Mobius 데이터는 **하위 디렉터리** `mobius/` 에만 쓴다.
 3. 새 UserDefaults 키는 `mobius.` 접두사를 붙인다 (상류 키와의 충돌 및 rebase 충돌 예방).
    통합 시점 기준 양쪽 키 충돌은 0개였다 — 접두사는 미래 충돌 예방용이다.
-4. **앱 시작 순서**: `migrateLegacyStorageIfNeeded()` → `MobiusDataMigration.migrateIfNeeded()` →
-   `AccountsState` 생성. 세 단계가 모두 "대상이 이미 있으면 건너뛴다"로 게이트되므로 뒤가 먼저
-   돌면 앞이 영영 안 돈다 — 아래 '앱 시작 순서' 절.
+4. **앱 시작 순서**: `LegacyDefaultsDomainMigration.migrateIfNeeded()` →
+   `StateDirectoryMigration.migrateIfNeeded()` → `MobiusDataMigration.migrateIfNeeded()` →
+   `AccountsState` 생성. 네 단계가 모두 "대상이 이미 있으면(또는 이미 한 번 돌았으면) 건너뛴다"로
+   게이트되므로 뒤가 먼저 돌면 앞이 영영 안 돈다 — 아래 '앱 시작 순서' 절.
+
+## 개명과 데이터 이전 (2026-09-12, 사용자 결정)
+
+이 포크는 상류와 이름·정체성을 통째로 분리했다. 그전까지는 §데이터 보존 불변식 1 이
+"바꾸지 않는다"였는데, 두 앱이 같은 번들 ID·같은 설치 경로를 공유하는 데서 오는 문제
+(상류 zip·cask 가 이 앱을 덮어씀, 같은 자리를 두고 다투는 업데이트 경로)를 없애기로 했다.
+
+### 바꾼 것
+
+| 대상 | 전 | 후 |
+|---|---|---|
+| SwiftPM 타깃·디렉터리 | `PokeTokenBar` / `PokeTokenBarTests` | `PokeTokenBarExtended` / `PokeTokenBarExtendedTests` |
+| 실행파일·`.app`·`CFBundleName` | `PokeTokenBar` | `PokeTokenBarExtended` (공백 없음 — 경로·launchctl 라벨 안정성) |
+| `CFBundleDisplayName` | `PokeTokenBar Extended` | 그대로 (사람이 읽는 이름이라 공백 유지) |
+| 번들 ID | `io.github.chattymin.poketokenbar` | `io.github.sun007021.poketokenbarextended` |
+| LaunchAgent 라벨·plist | `io.github.chattymin.poketokenbar.login` | `io.github.sun007021.poketokenbarextended.login` |
+| Application Support | `…/PokeTokenBar/` | `…/PokeTokenBarExtended/` |
+| 로그·크래시 마커 | `~/Library/Logs/PokeTokenBar.{log,running,crash.log}` | `…/PokeTokenBarExtended.{log,running,crash.log}` |
+
+로그 파일까지 가른 이유: 개명 **때문에** 두 앱이 공존할 수 있게 됐고, `…​.running` 은 크래시
+감지 마커라 공유하면 각 앱이 상대의 수명주기를 자기 크래시로 읽는다.
+
+### 일부러 안 바꾼 것
+
+- **`PTB_STATE_DIR`** — 테스트 다수가 쓰는 환경변수 이름이다. 바꾸면 전수 수정인데 얻는 것이 없다.
+- **`UpdateChecker.repo = "chattymin/PokeTokenBar"`** — 상류 릴리스를 계속 알림으로 받겠다는
+  기존 결정 그대로다(§버전 표기).
+- **`PokeTokenBar Local` 자체서명 인증서 이름**(`scripts/create-signing-cert.sh`) — 앱이 아니라
+  인증서의 이름이다. 바꾸면 이미 가진 사람이 재발급해야 하고, 재발급은 코드 정체성 변경이라
+  Keychain 승인 프롬프트를 한 번 더 부른다.
+- **사용자 노출 제품명 문자열**(`[PokeTokenBar] 문제 리포트`, `PokeTokenBar 세이브 파일이 아니에요`
+  등 `Localization.swift`) — 표시 이름은 "PokeTokenBar Extended" 라 여전히 읽힌다. 7개 언어
+  카피 수정은 별도 결정으로 남긴다.
+- **`mobius.` UserDefaults 키 접두사**, `MobiusCore`·`MobiusCoreTests` 타깃 이름.
+- **`CONTRIBUTING*.md`·`README.ja.md`** — 상류 파일이라 건드리지 않는다(§상류 rebase).
+
+### 세 갈래 이전 (첫 실행에 자동)
+
+| # | 대상 | 구현 | 멱등 보장 |
+|---|---|---|---|
+| A | Application Support 디렉터리 | `StateDirectoryMigration` | 현재 이름의 디렉터리가 이미 있으면 아무것도 안 한다 |
+| B | `UserDefaults` 도메인 | `LegacyDefaultsDomainMigration` | 1회 마커 `ptb.legacyDefaultsDomainMigratedV1` + 키별 부재 검사 |
+| C | Mobius 계정 데이터 | (A) 가 겸한다 — `mobius/` 는 상태 디렉터리의 **하위**라 함께 따라온다 | (A) 와 같음 |
+
+**(A) 는 체인이다**: `TokenMac` → `PokeTokenBar` → `PokeTokenBarExtended`.
+`StateDirectoryMigration.names` 에서 **앞 항목을 지우지 마라** — 그 세대 이후로 앱을 한 번도
+안 켠 사용자의 데이터가 영영 도착하지 못한다. 새 이름은 배열 **끝에만** 붙인다. 여러 세대가
+동시에 남아 있을 수 있고(각 이전이 "대상이 있으면 건너뛴다"라 원본이 남는다) 그때는 **가장
+최근 세대가 이긴다**. 옮기다 실패하면 원본을 그대로 둔다(반쪽 이전보다 낫다).
+`AppStatePaths` 는 디렉터리 이름을 이 체인의 마지막 항목에서 가져온다 — 두 곳에 리터럴을
+두면 다음 개명에서 조용히 어긋난다.
+
+**(B) 는 덮어쓰지 않고 지우지도 않는다**: 새 도메인에 이미 있는 키는 건너뛰고(사용자가 새 앱에서
+먼저 고친 값 보호), 구 도메인은 남긴다(구 번들로 되돌릴 여지). **키를 고르지 않고 전부 옮긴다** —
+화이트리스트를 두면 설정을 추가할 때마다 여기를 고쳐야 하고 빠뜨리면 조용히 유실된다.
+`NSStatusItem Preferred Position …` 같은 시스템 관리 키도 포함한다: 값의 의미가 "사용자가
+메뉴바 아이콘을 끌어다 놓은 자리"이고, 이 도메인에 macOS 가 넣는 키 중 앱 번들 경로나 코드
+정체성을 담는 것은 없다. **1회 마커**가 필요한 이유는 부재 검사만으로는 사용자가 새 도메인에서
+*지운* 값이 다음 실행에 되살아나기 때문이다.
+
+(B) 는 `MobiusLaunchSequence` 의 **첫** 단계다 — 뒤 단계와 `UsageStore`·`CompanionStore` 가 전부
+`UserDefaults` 를 읽는 쪽이라 늦으면 그 실행 내내 설정이 초기값이다(§앱 시작 순서).
+
+회귀 가드는 `Tests/PokeTokenBarExtendedTests/RenameMigrationTests.swift`(15건) +
+`MobiusLaunchSequenceTests`(순서 2건). 각 가드는 지키려는 결함을 실제로 주입해 빨간불이 되는
+것을 확인하고 넣었다 — 체인에서 `TokenMac` 제거, 체인 역순 순회, 기존 값 덮어쓰기, 1회 마커 제거,
+설정 복사를 맨 뒤로, 디렉터리 이름 리터럴 하드코딩.
+
+### 넘어오지 **않는** 것 (첫 실행에 사용자가 겪는 것)
+
+- **로그인 시 실행.** 구 LaunchAgent(`io.github.chattymin.poketokenbar.login`)는 라벨이 달라
+  새 앱이 관리하지 못하고, 그 plist 는 구 번들 안에 있어 **새 앱이 해제할 수도 없다**
+  (`SMAppService.agent(plistName:)` 는 자기 번들의 `Contents/Library/LaunchAgents` 만 본다).
+  구 앱을 지우면 launchd 가 없는 실행파일을 띄우려다 실패할 뿐이라 무해하지만, 그 자리에
+  상류 `PokeTokenBar.app` 을 설치하면 **상류가 로그인 때 자동 실행된다.** 정리는 수동이다:
+  `launchctl bootout gui/$(id -u)/io.github.chattymin.poketokenbar.login` 후 새 앱 설정에서
+  "로그인 시 실행"을 다시 켠다.
+- **알림 권한.** macOS 는 번들 ID 단위로 기억한다 — 새 앱이 처음 알림을 낼 때 다시 묻는다.
+- **Keychain '항상 허용'.** 지정 요구사항(Designated Requirement)에 번들 ID 가 들어가므로
+  (`codesign -d -r-` 로 확인) 구 정체성에 준 승인은 새 앱에 적용되지 않는다 — 아래 §Keychain.
+- **로그 이력.** `~/Library/Logs/PokeTokenBar.log` 는 그대로 남고 새 앱은 새 파일에 쓴다.
+
+### Keychain 은 개명의 영향을 받지 않는다 (판단)
+
+- **계정 전환이 쓰는 자격증명은 앱 밖에 있다** — `~/.claude.json`, `~/.claude/.credentials.json`,
+  `~/.codex/auth.json`, 그리고 Keychain 항목 `Claude Code-credentials`. 전부 **Claude/Codex CLI 가
+  소유**하는 자원이라 앱 이름·번들 ID 와 무관하다. 옮길 것이 없다.
+- **이 앱은 자기 Keychain 항목을 만들지 않는다**(`docs/reference/defect-log.md` §자격증명·Keychain
+  의 "앱 소유 keychain 항목 금지"). 그래서 개명으로 고아가 되는 항목도 없다.
+- **파티션 리스트 도장은 그대로 `apple-tool:`** — `MobiusCore.SystemKeychain` 은 읽기·쓰기를 모두
+  `/usr/bin/security` 경유로 하고, 파티션 재도장은 **수정한 프로세스**의 cdhash 로 찍힌다. 우리
+  프로세스가 아니라 `security` 가 수정하므로 우리 번들 ID 가 무엇이든 결과가 같다. 개명은 이
+  구조에 영향을 주지 않는다(코드 변경 없음).
+- **대가는 한 번의 승인 프롬프트뿐** — 호스트 앱 쪽 한도 조회(`OAuthLimitsProvider`·
+  `SessionKeyLimitsProvider`·`AntigravityRateLimitsProvider`)는 남의 Keychain 항목을 네이티브
+  `SecItemCopyMatching` 으로 읽고, 그 ACL 승인은 코드 정체성에 묶인다. 번들 ID 가 바뀌면 지정
+  요구사항이 바뀌므로 첫 읽기에서 **한 번** 다시 묻는다. 서명 인증서는 그대로(Developer ID
+  Sunwook Lee)라 그 뒤로는 안정적이다.
 
 ## 이식 규칙 (Mobius 가 실패로 배운 것 — 재현 금지)
 
@@ -114,20 +217,20 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
 - **익명 로그 라인으로 계정 상태를 기록하지 않는다.** Claude 세션 로그 hit 에는 계정 식별자가 없어
   전환 직후 옛 계정의 에러가 새 계정에 박힌다 → 자동 전환이 통째로 죽는다. 판정은 usage API 로 한다.
 - **이식한 코드는 호스트 앱의 환경 가드 관례를 따른다.** PTB 는 번들이 아닐 수 있다 — raw 바이너리
-  개발 실행(`swift run` / `./.build/debug/PokeTokenBar`)과 `swift test` 가 그 경우다. 알림
+  개발 실행(`swift run` / `./.build/debug/PokeTokenBarExtended`)과 `swift test` 가 그 경우다. 알림
   (`UNUserNotificationCenter`)·로그인아이템(`SMAppService`)·프로덕션 로그처럼 **번들을 요구하는 API
   는 `AppEnv.isBundledApp` 뒤에 둔다**. `UNUserNotificationCenter.current()` 는 번들이 아니면 nil 을
   주는 게 아니라 **예외를 던져 프로세스를 죽인다** — Mobius 는 항상 `.app` 이라 이 가드가 없었고,
   이식된 `AccountsState.start()`/`notify()` 가 그대로 넘어와 기능 토글을 켠 raw 바이너리가 시작 즉시
   죽었다. Phase 5~8 에서 새 알림·로그인아이템 코드를 더할 때 같은 게이트를 붙일 것. 회귀 가드는
-  `Tests/PokeTokenBarTests/MobiusBundleGuardTests.swift`(진짜 트리거 호출 2건 + 소스 스캔 1건),
+  `Tests/PokeTokenBarExtendedTests/MobiusBundleGuardTests.swift`(진짜 트리거 호출 2건 + 소스 스캔 1건),
   부류 전체 기록은 `docs/reference/defect-log.md` §알림.
 
 ## Phase 1 실측
 
 - **Swift 언어 모드 경계**: 이 패키지는 `swift-tools-version: 6.0` 이지만 `MobiusCore` 타깃만
   `.swiftLanguageMode(.v5)` 로 핀 고정했다. 엔진 4,100줄을 무수정으로 이식하려면 상류(Mobius)와
-  같은 언어 모드가 필요했기 때문이다. Phase 3 에서 Swift 6 모드인 PokeTokenBar 쪽(`@MainActor`
+  같은 언어 모드가 필요했기 때문이다. Phase 3 에서 Swift 6 모드인 호스트 앱 쪽(`@MainActor`
   상태 계층, 예: `AccountsState`)이 v5 로 컴파일된 `MobiusCore` 타입을 actor 경계 너머로 넘길 때
   Sendable 마찰이 예상된다 — v1 대응은 필요한 지점에 `@preconcurrency import MobiusCore` 를
   붙이는 것으로 하고, `MobiusCore` 자체를 Swift 6 모드로 옮기는 것은 별도 후속으로 남긴다.
@@ -155,7 +258,7 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
 - [x] **Phase 0 — 안전망**: 데이터 백업(디렉터리 + UserDefaults), 포크·클론, 기준선 `swift test`
 - [x] **Phase 1 — 엔진 이식**: `MobiusCore` + `MobiusCoreTests` 복사, `Package.swift` 배선. **UI 변화 0**
 - [x] **Phase 2 — 경로 주입 + 마이그레이션**: `MobiusEnvironment.appSupport` 주입,
-      기존 `~/Library/Application Support/Mobius/` → `PokeTokenBar/mobius/` 1회 **복사**(이동 아님),
+      기존 `~/Library/Application Support/Mobius/` → `<상태 디렉터리>/mobius/` 1회 **복사**(이동 아님),
       `secrets/` 0600 권한 보존 검증, 멱등성 테스트
 - [x] **Phase 3 — 상태 계층**: `AppState` → `AccountsState`(ObservableObject 유지, sync·update 제거),
       `LoginFlow`·`ToolInventory`·`ClaudeCLI` 이식, 토글 off 면 타이머 미생성
@@ -169,7 +272,7 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
       (`NSWorkspace.willSleepNotification`/`didWakeNotification`)이어야 하고, 깨어날 때 즉시 1틱을
       돌리는 경로가 함께 필요하다)
 - [x] **Phase 7 — 다국어**: 계정 전환 문구 65개를 `L` 로 이관 완료(lproj·`Bundle.module` 금지).
-      Phase 3 이 만든 임시 경유지 `Sources/PokeTokenBar/Mobius/MobiusStrings.swift` 는
+      Phase 3 이 만든 임시 경유지 `Sources/PokeTokenBarExtended/Mobius/MobiusStrings.swift` 는
       호출부가 사라져 **삭제**했다. 항목은 `Localization.swift` 의 `accountsNotify*`(알림)·
       `accountsError*`(배너·실패 사유·에러 매핑) 접두사로 모여 있고, 비-UI 계층이 `L` 을 얻는
       방법은 위 §다국어 규칙 참조
@@ -186,16 +289,20 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
 
 ### Homebrew cask 는 제거한다 (사용자 결정)
 
-상류 릴리스를 받는 `poke-token-bar` cask 와 이 포크는 **같은 번들 ID·같은 설치 경로**를 쓴다.
-cask 를 남겨 두면 `brew upgrade` 한 번에 포크가 상류 빌드로 조용히 덮어써진다.
+**개명 전** 상류 릴리스를 받는 `poke-token-bar` cask 와 이 포크는 같은 번들 ID·같은 설치
+경로를 썼고, cask 를 남겨 두면 `brew upgrade` 한 번에 포크가 상류 빌드로 조용히 덮어써졌다.
+개명 이후에는 경로도 번들 ID 도 달라 **덮어쓰기 경로 자체가 사라졌다** — cask 를 남겨 두면
+상류 앱이 따로 설치될 뿐이다. 그래도 두 앱을 같이 두면 메뉴바 아이콘이 둘이고 같은 사용량
+로그를 둘이 읽으므로, 이 포크만 쓸 생각이면 그대로 지우는 편이 낫다.
 
 ```bash
 brew uninstall --cask poke-token-bar
 ```
 
-`--zap` 을 **붙이지 않는다** — `--zap` 은 `~/Library/Application Support/PokeTokenBar` 까지 지워
-도감·토큰·계정 데이터가 함께 날아간다. 위 명령은 `/Applications/PokeTokenBar.app` 만 지우고
-데이터는 그대로 둔다. 이후 업데이트는 아래 빌드 명령으로 직접 한다.
+`--zap` 을 **붙이지 않는다** — `--zap` 은 `~/Library/Application Support/PokeTokenBar` 까지
+지운다. 개명 첫 실행 **전**이라면 그 디렉터리가 아직 이 포크의 데이터 원본이라 도감·토큰·계정이
+함께 날아가고, 개명 첫 실행 **후**라도 되돌릴 원본이 사라진다. 위 명령은
+`/Applications/PokeTokenBar.app` 만 지우고 데이터는 그대로 둔다.
 
 cask 제거는 이제 **유일한 방어가 아니다** — 앱 안의 cask 업그레이드 경로도 코드에서 닫혀 있다
 (§상류 릴리스 알림이 떴을 때). cask 를 다시 설치해도 덮어쓰기가 되살아나지 않는다.
@@ -207,7 +314,7 @@ cask 제거는 이제 **유일한 방어가 아니다** — 앱 안의 cask 업�
 계정 전환이 아예 안 된다 — 남겨 둘 이유가 없다.
 
 계정 데이터는 **이미 복사돼 있다**: Phase 2 의 마이그레이션은 이동이 아니라 복사라
-`~/Library/Application Support/PokeTokenBar/mobius/` 에 사본이 있고 원본
+`~/Library/Application Support/PokeTokenBarExtended/mobius/` 에 사본이 있고 원본
 `~/Library/Application Support/Mobius/` 도 그대로 남아 있다. 즉 Mobius.app 을 지워도
 되돌릴 원본이 남는다.
 
@@ -247,7 +354,7 @@ git rebase upstream/main          # mobius-integration 브랜치에서
 ```
 
 충돌은 §코드 배치 가 정한 4곳(`Package.swift`, `UI/PopoverView.swift`, `UI/SettingsView.swift`,
-`PokeTokenBarApp.swift`)과 `Localization.swift` 에만 나야 정상이다. 그 밖에서 충돌이 나면
+`PokeTokenBarExtendedApp.swift`)과 `Localization.swift` 에만 나야 정상이다. 그 밖에서 충돌이 나면
 격리 경계가 무너진 것이니 경계를 되돌리는 쪽으로 해결한다. `README*.md` 는 상류 파일이라
 **건드리지 않는다** — 이 포크의 문서는 이 파일이다. rebase 후에는 `./scripts/test-gate.sh`.
 
@@ -308,9 +415,10 @@ rebase 로 기준점이 올라갔으면 `scripts/build-app.sh` 의 `UPSTREAM_VER
 
 ### 상류 릴리스 알림이 떴을 때 (덮어쓰기 금지)
 
-배너의 **업데이트 버튼을 눌러 릴리스 페이지에서 받으면 안 된다.** 상류 zip 은 같은 경로의
-같은 번들 ID 를 교체하므로 계정 전환 기능이 통째로 사라진다(계정 *데이터* 는 남는다 — 번들
-ID·데이터 디렉터리를 안 바꿨기 때문. §데이터 보존 불변식). 올바른 갱신은 rebase 다:
+배너의 **업데이트 버튼을 눌러 받은 상류 zip 으로는 이 앱이 갱신되지 않는다.** 개명 이후
+상류 빌드는 다른 번들 ID·다른 설치 경로의 **별개 앱**이라, 받아서 `/Applications` 에 넣으면
+이 앱은 그대로 둔 채 메뉴바 아이콘만 하나 늘어난다(개명 전에는 같은 자리를 덮어써 계정 전환
+기능이 통째로 사라졌다 — 그건 더 이상 일어나지 않는다). 올바른 갱신은 여전히 rebase 다:
 
 ```bash
 git fetch upstream
@@ -321,7 +429,9 @@ CODESIGN_IDENTITY="Developer ID Application: Sunwook Lee (TYN557Y96W)" \
   PTB_REQUIRE_STABLE_SIGN=1 ./scripts/build-app.sh
 ```
 
-**자동 덮어쓰기 경로는 코드에서 닫았다** — `UpdateChecker.allowsBrewCaskUpgrade = false`.
+**자동 덮어쓰기 경로는 코드에서 닫아 두었다** — `UpdateChecker.allowsBrewCaskUpgrade = false`.
+개명으로 설치 경로가 갈려 이 분기는 이제 이 앱을 덮지 못하지만, 되돌리지 않는다: 앱을 종료하고
+남의 번들을 건드리는 동작 자체가 이 포크가 할 일이 아니다.
 `applyUpdate()` 의 brew 분기는 확인창 **하나 없이** 앱을 종료하고 `brew upgrade --cask
 poke-token-bar` 로 번들을 교체한다. 지금은 사용자가 cask 를 지워 `brewCaskPath()` 가 nil 이지만
 한 번이라도 재설치되면 그 경로가 되살아나므로, 우연한 상태가 아니라 코드가 막게 했다
@@ -355,7 +465,7 @@ git diff -- Sources/MobiusCore/MobiusEnvironment.swift   # ← 반드시 확인
 
 ★ **`Sources/MobiusCore/MobiusEnvironment.swift` 의 `appSupportDirOverride` 는 이 포크의
 유일한 수정 지점이라 보존해야 한다** (§코드 배치: "수정 1곳(appSupport 주입)만 허용").
-통째로 덮으면 주입이 사라져 계정 데이터가 `~/Library/Application Support/PokeTokenBar/mobius/`
+통째로 덮으면 주입이 사라져 계정 데이터가 `~/Library/Application Support/PokeTokenBarExtended/mobius/`
 가 아니라 **원본 Mobius.app 의 `…/Mobius/` 로 되돌아간다** — 에러 없이, 두 앱이 같은 파일을
 쓰는 상태로. 복사 후 이 한 파일의 diff 를 눈으로 보고 주입을 되살린 뒤 `./scripts/test-gate.sh`
 (`MobiusDataMigrationTests`·`MobiusLaunchSequenceTests` 가 경로를 잠근다).
@@ -371,16 +481,19 @@ git diff -- Sources/MobiusCore/MobiusEnvironment.swift   # ← 반드시 확인
 
 | 순서 | 단계 | 먼저 돌면 잃는 것 |
 |---|---|---|
-| 1 | `legacyStorageRename` (`TokenMac` → `PokeTokenBar`) | `!fileExists(new)` 게이트 — 누가 먼저 `AppStatePaths.directory()` 를 부르면(호출만으로 디렉터리가 **생긴다**) TokenMac 시절 도감·토큰이 영영 이전 안 됨 |
-| 2 | `mobiusDataMigration` (`…/Mobius` → `PokeTokenBar/mobius`) | `alreadyMigrated` 판정이 **대상 디렉터리 존재** — `AccountStore` 가 먼저 저장해 `mobius/` 를 만들면 기존 Mobius.app 계정·비밀 스냅샷이 영영 이전 안 됨 |
-| 3 | `accountStateCreation` (`AccountsState` + 조건부 `start()`) | — |
+| 1 | `legacyDefaultsDomainCopy` (구 번들 ID 도메인 → 현재 도메인) | 뒤 단계와 `UsageStore`·`CompanionStore` 가 전부 `UserDefaults` 를 **읽는** 쪽 — 늦으면 그 실행 내내 설정이 초기값이다. 특히 `accountStateCreation` 은 `mobius.enabled` 를 읽어 엔진을 켤지 정하므로, 자동 전환을 켜 둔 사용자에게 그 실행에서는 전환이 안 돈다 |
+| 2 | `legacyStorageRename` (`TokenMac` → `PokeTokenBar` → `PokeTokenBarExtended`) | `!fileExists(new)` 게이트 — 누가 먼저 `AppStatePaths.directory()` 를 부르면(호출만으로 디렉터리가 **생긴다**) 옛 이름 시절 도감·토큰이 영영 이전 안 됨 |
+| 3 | `mobiusDataMigration` (`…/Mobius` → `<상태 디렉터리>/mobius`) | `alreadyMigrated` 판정이 **대상 디렉터리 존재** — `AccountStore` 가 먼저 저장해 `mobius/` 를 만들면 기존 Mobius.app 계정·비밀 스냅샷이 영영 이전 안 됨 |
+| 4 | `accountStateCreation` (`AccountsState` + 조건부 `start()`) | — |
 
-`Tests/PokeTokenBarTests/MobiusLaunchSequenceTests.swift` 가 각 순서를 **실제 파일 연산으로
+`Tests/PokeTokenBarExtendedTests/MobiusLaunchSequenceTests.swift` 가 각 순서를 **실제 파일 연산으로
 재생**해 데이터가 실제로 넘어왔는지 본다(순서 단언만으로는 "왜 그 순서인지"를 증명 못 한다).
-프로덕션 함수 셋(`AppDelegate.migrateLegacyStorageIfNeeded(base:)`,
-`MobiusDataMigration.migrateIfNeeded(source:)`, `AppStatePaths.directory()`)을 `PTB_STATE_DIR`
-로 임시 디렉터리에 격리해 그대로 호출한다 — 그 함수들의 `base`/`source` 파라미터는 **테스트
-주입 전용**이고, 함정 당사자인 대상 경로 유도는 일부러 주입하지 않는다.
+프로덕션 함수 넷(`LegacyDefaultsDomainMigration.migrateIfNeeded(...)`,
+`StateDirectoryMigration.migrateIfNeeded(base:)`, `MobiusDataMigration.migrateIfNeeded(source:)`,
+`AppStatePaths.directory()`)을 `PTB_STATE_DIR` 와 임시 suite 두 개로 격리해 그대로 호출한다 —
+그 함수들의 `base`/`source`/도메인 이름 파라미터는 **테스트 주입 전용**이고, 함정 당사자인
+대상 경로 유도는 일부러 주입하지 않는다. 실제 `~/Library/Application Support` 와 실제
+UserDefaults 도메인은 건드리지 않는다.
 
 마이그레이션 실패는 **앱 시작을 막지 않는다** — 계정 전환은 부가 기능인데 거기서 던지면 포켓몬
 앱 전체가 못 뜬다. `AppLog` 에 남기고 계속 진행하며, 실패하면 대상 디렉터리가 안 만들어지므로
@@ -393,18 +506,18 @@ git diff -- Sources/MobiusCore/MobiusEnvironment.swift   # ← 반드시 확인
 옵저버의 **유일한** 진입점이므로, 꺼진 상태의 런타임 동작은 기능을 넣기 전과 같다. 객체는
 생성되지만 `AccountStore.init` 은 디스크를 읽기만 하고 아무 디렉터리도 만들지 않는다.
 
-수동 확인: `defaults write io.github.chattymin.poketokenbar mobius.enabled -bool YES`.
+수동 확인: `defaults write io.github.sun007021.poketokenbarextended mobius.enabled -bool YES`.
 토글 UI 는 Phase 5.
 
 ## 상태 계층을 `ObservableObject` 로 두는 이유
 
-PokeTokenBar 는 `@Observable`(Observation), Mobius `AppState` 는 `@Published` 다. 변환하면 diff 가
+호스트 앱은 `@Observable`(Observation), Mobius `AppState` 는 `@Published` 다. 변환하면 diff 가
 1,850줄 전체로 번져 위 "이식 규칙" 들이 손상될 위험이 크다. SwiftUI 는 두 시스템의 공존을 허용하므로
 `AccountsState` 는 `ObservableObject` 그대로 두고 `.environmentObject` 로 붙인다.
 
 ## 알려진 트레이드오프 (v1 에서 감수)
 
-- **로그 스캐너 중복**: PokeTokenBar 의 `LocalUsageReader` 와 Mobius 의 `SessionLogWatcher` 가 같은
+- **로그 스캐너 중복**: 호스트 앱의 `LocalUsageReader` 와 Mobius 의 `SessionLogWatcher` 가 같은
   `~/.claude/projects` · `~/.codex/sessions` 트리를 각자 훑는다. v1 은 각자 캐시·오프셋으로 공존하고,
   Phase 3 에서 유휴 CPU 를 실측해 기준선 대비 +0.5%p 를 넘으면 통합을 앞당긴다.
 - **Desktop 동시 전환 코드는 남되 UI 미노출**: `performSwitch`/`reload` 에 얽혀 있어 제거 수술이
@@ -440,7 +553,7 @@ Mac 에 Mobius.app 이 떠 있는지에 따라 스위트 전체가 흔들리므�
 
 ### 전환 후 한도 캐시 무효화
 
-`OAuthAccessTokenCache`(PokeTokenBar 쪽)는 Claude 자격증명을 인메모리로 들고 있어, 계정을 바꿔도
+`OAuthAccessTokenCache`(호스트 앱 쪽)는 Claude 자격증명을 인메모리로 들고 있어, 계정을 바꿔도
 **옛 토큰으로 조회가 성공한다.** 증상은 "한도가 안 나온다"가 아니라 **A 계정 숫자가 B 계정 게이지로
 그려지는 것**이라 화면만 봐서는 틀렸다는 걸 알 수 없다(`CredentialSwitchCacheTests` 가 잠근 #227 과
 같은 부류).

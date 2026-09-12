@@ -96,7 +96,7 @@ duplicate that.
 ### From this repo's Releases (recommended)
 
 Download the zip from this fork's [GitHub Releases](https://github.com/sun007021/PokeTokenBar/releases),
-unzip it, and drag `PokeTokenBar.app` into `/Applications`.
+unzip it, and drag `PokeTokenBarExtended.app` into `/Applications`.
 
 The app is signed with a Developer ID certificate, but **it is not notarized** — Apple's
 notarization service isn't part of this fork's build process. That means a zip you
@@ -104,9 +104,9 @@ notarization service isn't part of this fork's build process. That means a zip y
 will refuse to open it with an "Apple could not verify..." message. Clear it once, either
 way:
 
-- **Finder:** right-click (or Control-click) `PokeTokenBar.app` → **Open** → **Open**
+- **Finder:** right-click (or Control-click) `PokeTokenBarExtended.app` → **Open** → **Open**
   again in the dialog that appears.
-- **Terminal:** `xattr -dr com.apple.quarantine /Applications/PokeTokenBar.app`
+- **Terminal:** `xattr -dr com.apple.quarantine /Applications/PokeTokenBarExtended.app`
 
 This is a one-time step per download — it is not a sign anything is wrong with the
 binary, just that it hasn't been through Apple's (paid, opt-in) notarization pipeline.
@@ -116,7 +116,7 @@ binary, just that it hasn't been through Apple's (paid, opt-in) notarization pip
 ```bash
 swift build          # debug
 swift test            # unit tests
-./scripts/build-app.sh   # release build → PokeTokenBar.app → /Applications
+./scripts/build-app.sh   # release build → PokeTokenBarExtended.app → /Applications
 ```
 
 `build-app.sh` signs the app so Keychain "always allow" choices survive rebuilds. Without
@@ -150,17 +150,22 @@ Same as upstream PokeTokenBar, plus the two new credential/account sources this 
 ## Data location
 
 This fork keeps its own data under
-`~/Library/Application Support/PokeTokenBar/` (bundle ID and app-support directory are
-unchanged from upstream — see the data-preservation invariants in
-[docs/reference/mobius-integration.md](docs/reference/mobius-integration.md)), with
-Mobius account data isolated under the `mobius/` subdirectory so it never collides with
-your Pokédex/companion save.
+`~/Library/Application Support/PokeTokenBarExtended/`, with Mobius account data isolated
+under the `mobius/` subdirectory so it never collides with your Pokédex/companion save.
+
+The fork has its own bundle identifier (`io.github.sun007021.poketokenbarextended`), so it
+installs alongside upstream instead of replacing it. On first launch it carries your
+existing data over: the Application Support directory is renamed from the old name, and the
+settings stored under the old bundle identifier are copied into the new domain once. Nothing
+is deleted — the old `UserDefaults` domain stays behind. See
+[docs/reference/mobius-integration.md](docs/reference/mobius-integration.md) for the
+migration details and what is *not* carried over.
 
 ## Taking upstream updates
 
 This fork tracks upstream PokeTokenBar via `git rebase`, not by downloading upstream's
-releases (doing that would silently strip this fork's account-switching code — same
-bundle ID and install path). See
+releases to update this app (upstream's build is a separate app now — installing it does
+not update this one). See
 [docs/reference/mobius-integration.md](docs/reference/mobius-integration.md) for the
 exact rebase procedure, version-numbering scheme, and update-notification behavior.
 

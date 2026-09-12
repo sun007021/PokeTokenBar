@@ -92,16 +92,16 @@ Pi Agent · omp)을 macOS 메뉴바 속 자라나는 **포켓몬 companion** 으
 ### 이 저장소의 Releases 에서 (권장)
 
 이 포크의 [GitHub Releases](https://github.com/sun007021/PokeTokenBar/releases) 에서 zip
-을 받아 압축을 풀고 `PokeTokenBar.app` 을 `/Applications` 로 드래그하세요.
+을 받아 압축을 풀고 `PokeTokenBarExtended.app` 을 `/Applications` 로 드래그하세요.
 
 앱은 Developer ID 인증서로 서명돼 있지만 **공증(notarization)은 받지 않았습니다** — 이
 포크의 빌드 과정에는 Apple 의 공증 서비스가 포함돼 있지 않습니다. 즉 브라우저·`curl` 등
 으로 **다운로드한** zip 에는 `com.apple.quarantine` 속성이 붙고, Gatekeeper 가 "Apple 이
 확인할 수 없습니다" 라며 실행을 막습니다. 아래 둘 중 하나로 한 번만 풀어주면 됩니다:
 
-- **Finder:** `PokeTokenBar.app` 을 우클릭(또는 Control-클릭) → **열기** → 뜨는 대화상자에서
+- **Finder:** `PokeTokenBarExtended.app` 을 우클릭(또는 Control-클릭) → **열기** → 뜨는 대화상자에서
   다시 **열기**.
-- **터미널:** `xattr -dr com.apple.quarantine /Applications/PokeTokenBar.app`
+- **터미널:** `xattr -dr com.apple.quarantine /Applications/PokeTokenBarExtended.app`
 
 다운로드할 때마다 한 번만 하면 되는 절차이고, 바이너리에 문제가 있다는 신호가 아니라
 Apple 의 (유료·선택) 공증 파이프라인을 거치지 않았다는 뜻일 뿐입니다.
@@ -111,7 +111,7 @@ Apple 의 (유료·선택) 공증 파이프라인을 거치지 않았다는 뜻�
 ```bash
 swift build          # 디버그
 swift test            # 유닛 테스트
-./scripts/build-app.sh   # 릴리스 빌드 → PokeTokenBar.app → /Applications
+./scripts/build-app.sh   # 릴리스 빌드 → PokeTokenBarExtended.app → /Applications
 ```
 
 `build-app.sh` 는 리빌드해도 Keychain "항상 허용" 이 유지되도록 서명합니다. 인증서가
@@ -144,17 +144,21 @@ CODESIGN_IDENTITY="Developer ID Application: 이름 (팀ID)" \
 
 ## 데이터 위치
 
-이 포크도 `~/Library/Application Support/PokeTokenBar/` 아래에 자기 데이터를 둡니다
-(번들 ID·앱 지원 디렉터리는 상류와 동일 — 데이터 보존 불변식은
-[docs/reference/mobius-integration.md](docs/reference/mobius-integration.md) 참고).
-Mobius 계정 데이터는 `mobius/` 하위 디렉터리에 격리돼 있어 도감·companion 세이브와
-절대 충돌하지 않습니다.
+이 포크는 `~/Library/Application Support/PokeTokenBarExtended/` 아래에 자기 데이터를
+둡니다. Mobius 계정 데이터는 `mobius/` 하위 디렉터리에 격리돼 있어 도감·companion
+세이브와 절대 충돌하지 않습니다.
+
+이 포크는 자기 번들 ID(`io.github.sun007021.poketokenbarextended`)를 쓰므로 상류를
+덮어쓰지 않고 나란히 설치됩니다. 첫 실행에 기존 데이터를 그대로 들고 옵니다 —
+Application Support 디렉터리는 옛 이름에서 이름변경되고, 옛 번들 ID 도메인에 저장된
+설정은 새 도메인으로 1회 복사됩니다. 지우는 것은 없습니다(구 `UserDefaults` 도메인은
+그대로 남습니다). 이전 세부와 **넘어오지 않는 것**은
+[docs/reference/mobius-integration.md](docs/reference/mobius-integration.md) 를 보세요.
 
 ## 상류 업데이트 가져오기
 
 이 포크는 `git rebase` 로 상류 PokeTokenBar 를 추적합니다 — 상류 릴리스를 그대로
-다운로드하는 방식은 쓰지 않습니다(같은 번들 ID·설치 경로를 쓰기 때문에 그러면 이 포크의
-계정 전환 코드가 조용히 사라집니다). 정확한 rebase 절차·버전 표기 규칙·업데이트 알림
+다운로드해 이 앱을 갱신하는 방식은 쓰지 않습니다(그건 다른 앱입니다). 정확한 rebase 절차·버전 표기 규칙·업데이트 알림
 동작은 [docs/reference/mobius-integration.md](docs/reference/mobius-integration.md) 를
 보세요.
 

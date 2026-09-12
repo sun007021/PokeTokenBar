@@ -1,4 +1,4 @@
-# PokeTokenBar — Claude 프로젝트 지침
+# PokeTokenBarExtended — Claude 프로젝트 지침
 
 이 파일은 **매 세션 전문이 로드된다.** 그래서 여기엔 *항상 적용되는 규칙*만 둔다.
 길고 상황별인 절차는 `docs/reference/` 로 내리고 아래 인덱스에서 "언제 읽는가"로 가리킨다.

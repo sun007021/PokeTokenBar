@@ -85,7 +85,7 @@ target, and `Package.swift` in this repository declares no external SwiftPM depe
 
 Everything outside `Sources/MobiusCore/` and `Tests/MobiusCoreTests/` that isn't part of
 the original PokeTokenBar source (the Mobius integration glue in
-`Sources/PokeTokenBar/Mobius/`, UI additions, build/packaging changes, and this notices
+`Sources/PokeTokenBarExtended/Mobius/`, UI additions, build/packaging changes, and this notices
 file) is this fork's own original work.
 
 ---

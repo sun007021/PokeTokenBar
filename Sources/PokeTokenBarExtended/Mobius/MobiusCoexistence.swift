@@ -4,7 +4,7 @@ import AppKit
 ///
 /// 계정 전환이 건드리는 것들 — Keychain `Claude Code-credentials`, `~/.claude.json`,
 /// `~/.claude/.credentials.json`, `~/.codex/auth.json` — 은 전부 **전역 자원**이다. 이 포크는
-/// 자기 상태(`accounts.json`·비밀 스냅샷)만 `PokeTokenBar/mobius/` 로 갈라 놓았을 뿐,
+/// 자기 상태(`accounts.json`·비밀 스냅샷)만 `<상태 디렉터리>/mobius/` 로 갈라 놓았을 뿐,
 /// 스왑 대상은 원본 Mobius.app 과 **같은 파일·같은 키체인 항목**이다.
 ///
 /// 두 프로세스가 그 자원을 동시에 스왑하면 원본의 '실패 기록 1' 이 그대로 재현된다 —

@@ -10,9 +10,9 @@ import MobiusCore
 
 enum MenuStatus { case primaryActive, fallbackActive, allExhausted, unknown }
 
-/// Mobius's `AppState`, ported into PokeTokenBar as the account-switching state layer.
+/// Mobius's `AppState`, ported in as the account-switching state layer.
 ///
-/// Deliberately still an `ObservableObject` while the rest of PokeTokenBar uses `@Observable`:
+/// Deliberately still an `ObservableObject` while the rest of the app uses `@Observable`:
 /// converting would spread the diff across the whole file and endanger the behaviour Mobius's
 /// failure log was written around. SwiftUI supports both observation systems side by side.
 ///
@@ -181,7 +181,7 @@ final class AccountsState: ObservableObject {
     let codexIO: CodexConfigIO
     let switcher: Switcher
     let watcher: SessionLogWatcher<RateLimitHit>              // Claude 세션 로그
-    // ★ 모듈 한정 필수: PokeTokenBar 자신도 `CodexRateLimitStatus`(Core/Models.swift)를 갖고
+    // ★ 모듈 한정 필수: 이 앱 자신도 `CodexRateLimitStatus`(Core/Models.swift)를 갖고
     // 있고 같은 모듈 이름이 먼저 잡히므로, 한정하지 않으면 엔진 타입과 조용히 어긋난다.
     let codexWatcher: SessionLogWatcher<MobiusCore.CodexRateLimitStatus> // Codex 세션 로그
     let codexRouter = CodexStatusRouter() // 전환 전 세션 파일 격리 (계정 오귀속 방지)
@@ -356,7 +356,7 @@ final class AccountsState: ObservableObject {
         return Double(MobiusFeature.advisoryThresholdDefault)
     }
 
-    /// 라이브 환경 + PokeTokenBar 상태 디렉터리 주입. `~/.claude`·`~/.codex`(그리고
+    /// 라이브 환경 + 이 앱의 상태 디렉터리 주입. `~/.claude`·`~/.codex`(그리고
     /// `MOBIUS_HOME`/`CODEX_HOME` 오버라이드)는 전역 자원이라 그대로 두고, Mobius가
     /// **자기 상태를 저장하는 위치만** 갈라낸다.
     static func isolatedEnvironment() -> MobiusEnvironment {
@@ -365,7 +365,7 @@ final class AccountsState: ObservableObject {
         return env
     }
 
-    /// - Parameter env: 기본값은 PokeTokenBar 전용 상태 디렉터리로 격리한 환경이다.
+    /// - Parameter env: 기본값은 이 앱 전용 상태 디렉터리로 격리한 환경이다.
     ///   ★ `MobiusEnvironment.live()`를 그대로 쓰면 `~/Library/Application Support/Mobius`,
     ///   즉 **Mobius.app이 쓰는 바로 그 파일들**을 두 프로세스가 함께 쓰게 되어 자격증명이
     ///   오염된다(`MobiusPaths` 주석 참조). 테스트·진단용으로만 다른 환경을 주입한다.
@@ -619,7 +619,7 @@ final class AccountsState: ObservableObject {
     /// 타이머는 다시 발화하지 않으므로 `isValid == false` 가 "확실히 멈췄다"의 직접 증거다.
     /// 켜고 끄기를 반복해도 타이머가 겹치지 않는지는 이 객체의 **동일성**으로 확인한다.
     /// (테스트 전용 접근자 관례: `AccountCardView.statusBadgesForTesting`,
-    /// `AppDelegate.migrateLegacyStorageIfNeeded(base:)`)
+    /// `StateDirectoryMigration.migrateIfNeeded(base:)`)
     var tickTimerForTesting: Timer? { timer }
 
     /// 테스트 전용 — 외부 변경(CLI) 통지 옵저버가 살아 있는지. 타이머와 함께 걷혀야
@@ -642,7 +642,7 @@ final class AccountsState: ObservableObject {
     /// 전환이 **실제로 성사된 뒤** 호출된다 — 자동(`apply`)·수동(`performSwitch`) 두 경로가
     /// 모두 지나며, 전환이 throw 하면 호출되지 않는다.
     ///
-    /// 호스트 앱이 자기 캐시를 버릴 자리다. `AccountsState` 는 PokeTokenBar 의 사용량 계층을
+    /// 호스트 앱이 자기 캐시를 버릴 자리다. `AccountsState` 는 이 앱의 사용량 계층을
     /// 모르고 알 필요도 없으므로(둘 다 들고 있는 것은 `AppDelegate` 다), 새 전역 상태를 만드는
     /// 대신 `UsageStore.onRefresh` 와 같은 콜백 관례를 따른다.
     var onSwitched: (@MainActor (Provider) -> Void)?

@@ -1,8 +1,8 @@
 import Foundation
 
-/// One-time copy of an existing Mobius.app user's data into PokeTokenBar's own state directory.
+/// One-time copy of an existing Mobius.app user's data into this app's own state directory.
 ///
-/// PokeTokenBar keeps its Mobius integration data under `AppStatePaths.directory()/mobius/`
+/// This app keeps its Mobius integration data under `AppStatePaths.directory()/mobius/`
 /// rather than sharing `~/Library/Application Support/Mobius/` with Mobius.app itself — running
 /// both apps against the same files risks the credential-corruption races Mobius's own history
 /// records (concurrent writers to `accounts.json` / Keychain). This migration only ever *copies*;
