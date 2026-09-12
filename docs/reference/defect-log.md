@@ -93,12 +93,21 @@ read_when:
   담고 있을 때만** 쓰고 아니면 `organizationType` 으로 폐백한다. 판별은 **관찰한 일반값 하나**
   (`claude_ai`)만 걸러내는 형태로 좁게 둔다 — 모르는 티어는 예전 그대로라 회귀 면적이 0이다.
   ★ **파생값을 저장하면 함수를 고쳐도 화면은 안 고쳐진다**: `tierDescription` 은 등록 시점에
-  `AccountStore.upsertProfile` 로 **저장**되고, `reconcile`·`adoptLiveAccountIfUnregistered`
-  둘 다 이 필드를 다시 쓰지 않는다(실측: 앱 재시작으로도 `Ai` 가 남는다). 복구는 그 계정으로
-  **다시 로그인**하는 것뿐이다(`LoginFlow` 의 `.refreshed` → 같은 upsert). 표시 규칙을 고칠
-  때는 **저장된 사본이 어디서 갱신되는지**를 같이 확인하라. 가드: `ClaudeConfigIOTests` 의
-  플랜 6건(수정 전 Pro 케이스가 빨갛다) + `AccountStoreTests
-  .testReloginRefreshesAStaleStoredTierDescription`.
+  `AccountStore.upsertProfile` 로 **저장**되고, 원래는 `reconcile`·`adoptLiveAccountIfUnregistered`
+  둘 다 이 필드를 다시 쓰지 않았다(실측: 앱 재시작으로도 `Ai` 가 남았고, 복구는 그 계정으로 다시
+  로그인하는 것뿐이었다). 표시 규칙을 고칠 때는 **저장된 사본이 어디서 갱신되는지**를 같이
+  확인하라. → `reconcile` 이 라이브 신원을 읽어 따라가게 했다(플랜 변경·조직 변경도 자동 반영).
+  값싼 성질은 유지된다: `liveIdentity()` 는 `liveEmail()` 과 **같은 파일 한 번**을 읽고
+  (Claude `~/.claude.json`, Codex `auth.json` 의 id_token) Keychain·네트워크가 없다.
+  ★ 이런 "라이브를 따라가는" 갱신에는 **두 가드가 짝으로** 필요하다 — (1) 값이 실제로 달라진
+  틱에만 쓴다(`AccountStore.update` 가 무조건 `save()` 라, 비교 없이 부르면 정상 상태의 15초
+  틱이 전부 디스크 쓰기가 된다), (2) **빈 값으로 덮어쓰지 않는다**(신원 파일은 바쁜 파일이라
+  플랜 필드가 아직 없는 상태를 읽을 수 있고, 멀쩡한 "Max 20X" 를 빈 줄로 지우는 것이야말로
+  사용자가 보는 결함이다). 이메일과 플랜이 **같은 한 번의 읽기**에서 나온 짝이라 전환 도중에도
+  "A 의 이메일 + B 의 플랜"은 만들어지지 않는다(Keychain↔파일을 각각 읽던 옛 레이스와 다른 점).
+  가드: `ClaudeConfigIOTests` 의 플랜 6건(수정 전 Pro 케이스가 빨갛다) + `AccountStoreTests
+  .testReloginRefreshesAStaleStoredTierDescription` + `SwitcherTests` 의 reconcile 4건
+  (갱신 / 값이 같으면 **저장 없음** / 빈 읽기로 지우지 않음 / 다른 계정 불변).
 
 ## 외부 로그·사용량 소스
 

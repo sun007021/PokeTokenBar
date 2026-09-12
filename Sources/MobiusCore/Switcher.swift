@@ -217,13 +217,17 @@ public final class Switcher: @unchecked Sendable {
     }
 
     private func reconcile(provider: Provider, io: any ProviderConfigIO) async throws {
-        // 이메일은 승인창 없는 값싼 경로로 읽는다. 활성 계정이 그대로면 비밀 읽기
-        // (Claude는 Keychain)를 아예 하지 않아 15초 주기 승인창 폭탄을 막는다.
-        guard let email = try io.liveEmail(),
+        // 신원(이메일 + 표시용 플랜)은 승인창 없는 값싼 경로로 **한 번에** 읽는다 — 두 프로바이더
+        // 모두 liveIdentity()가 liveEmail()과 같은 파일 하나만 읽고 같은 값을 파싱한다
+        // (Claude: ~/.claude.json, Codex: auth.json의 id_token). Keychain도 네트워크도 이 경로에
+        // 없으므로 이메일만 읽던 때와 비용이 같다. 활성 계정이 그대로면 비밀 읽기(Claude는
+        // Keychain)를 아예 하지 않아 15초 주기 승인창 폭탄을 막는 성질도 그대로다.
+        guard let identity = try io.liveIdentity(),
               let profile = store.file.accounts.first(where: {
-                  $0.provider == provider && $0.emailAddress == email
+                  $0.provider == provider && $0.emailAddress == identity.emailAddress
               })
         else { return }
+        try refreshDisplayedPlan(identity, on: profile)
         let activeUnchanged = store.file.activeByProvider[provider] == profile.id
         // 존재 확인은 stat으로 — 15초 주기 정상 경로에서 비밀 파일 전체를 읽지 않는다
         // (파일이 없을 때만 secretData가 레거시 Keychain 이관까지 시도).
@@ -234,7 +238,7 @@ public final class Switcher: @unchecked Sendable {
 
         // 실제 변화가 있을 때만(드묾) 비밀+이메일 두 번 읽어 일치 확인 후 저장.
         guard let (live, stableEmail) = await io.readStableLiveSecretData(),
-              stableEmail == email else { return }
+              stableEmail == identity.emailAddress else { return }
         try saveLiveSecret(live, for: profile.id)
         if !activeUnchanged {
             try store.setActive(profile.id)
@@ -242,5 +246,25 @@ public final class Switcher: @unchecked Sendable {
             // 플래그를 내려 onTick의 primary 자동 복귀를 막는다 (앱·CLI 공통 경로).
             try store.setAutoSwitchedFromPrimary(false, provider: provider)
         }
+    }
+
+    /// 카드에 보이는 플랜 문자열(`tierDescription`)은 등록 시점에 파생돼 **저장된** 값이라,
+    /// 플랜이 바뀌거나(Pro→Max) 표시 규칙이 고쳐져도 저장된 사본은 옛 문자열로 남는다. 라이브가
+    /// 진실이므로 여기서 따라가게 한다.
+    ///
+    /// ★ **실제로 달라진 틱에만 쓴다.** `AccountStore.update`는 무조건 `save()`까지 하므로 비교
+    /// 없이 부르면 정상 상태의 15초 틱이 매번 accounts.json 쓰기가 된다.
+    ///
+    /// ★ **빈 값으로 덮어쓰지 않는다.** 신원 파일은 실행 중인 CLI가 계속 쓰는 바쁜 파일이라
+    /// 이메일은 있는데 플랜 필드는 아직 없는 상태를 읽을 수 있다. 그때 멀쩡한 "Max 20X"를 빈
+    /// 줄로 지우면 사용자에겐 그게 곧 결함이다 — 정보 없는 읽기는 그냥 건너뛴다.
+    ///
+    /// 이메일과 플랜은 **같은 한 번의 읽기**에서 나온 짝이라, 전환 도중의 파일을 읽어도 "A의
+    /// 이메일 + B의 플랜"이 만들어지지 않는다(옛 실패 기록의 Keychain↔파일 레이스와 다른 점).
+    private func refreshDisplayedPlan(_ identity: ProviderIdentity,
+                                      on profile: AccountProfile) throws {
+        guard !identity.tierDescription.isEmpty,
+              identity.tierDescription != profile.tierDescription else { return }
+        try store.update(profile.id) { $0.tierDescription = identity.tierDescription }
     }
 }

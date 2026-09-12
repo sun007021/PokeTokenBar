@@ -200,4 +200,68 @@ final class SwitcherTests: XCTestCase {
         XCTAssertEqual(store.file.activeAccountID, work.id)
         XCTAssertFalse(reauthFlag(personal.id))
     }
+
+    // MARK: 표시용 플랜 자가 치유 (reconcile)
+
+    /// 라이브 oauthAccount 를 그대로 쓴다 — 플랜 필드까지 든 실제 형태.
+    private func writeLiveOAuth(email: String, type: String?, tier: String?) throws {
+        var block: [String: Any] = ["emailAddress": email, "organizationName": "O"]
+        if let type { block["organizationType"] = type }
+        if let tier { block["organizationRateLimitTier"] = tier }
+        let json: [String: Any] = ["oauthAccount": block]
+        try JSONSerialization.data(withJSONObject: json).write(to: env.claudeJSON)
+    }
+
+    /// 저장된 `tierDescription` 은 등록 시점의 파생값이라, 플랜이 바뀌거나(Pro→Max) 표시 규칙이
+    /// 고쳐져도 옛 문자열이 남는다. 라이브가 진실이므로 reconcile 이 따라가야 한다.
+    func testReconcileRefreshesAStaleStoredPlan() async throws {
+        try store.update(personal.id) { $0.tierDescription = "Ai" }
+        try writeLiveOAuth(email: "p@x.com", type: "claude_pro", tier: "default_claude_ai")
+
+        try await switcher.reconcile()
+
+        XCTAssertEqual(store.file.accounts.first { $0.id == personal.id }?.tierDescription, "Pro")
+    }
+
+    /// ★ 이 테스트가 없으면 자가 치유는 **15초마다 accounts.json 을 다시 쓰는** 기능이 된다.
+    /// 저장 여부는 파일을 지워 두고 다시 생겼는지로 본다 — mtime 해상도에 안 기댄다.
+    func testReconcileDoesNotWriteWhenThePlanIsUnchanged() async throws {
+        try writeLiveOAuth(email: "p@x.com", type: "claude_pro", tier: "default_claude_ai")
+        try await switcher.reconcile()   // 1회차: 갱신 + 저장
+        XCTAssertEqual(store.file.accounts.first { $0.id == personal.id }?.tierDescription, "Pro")
+
+        try FileManager.default.removeItem(at: env.accountsFile)
+        try await switcher.reconcile()   // 2회차: 값이 같다 → 저장이 없어야 한다
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: env.accountsFile.path),
+                       "값이 그대로인데 저장하면 정상 상태의 매 틱이 디스크 쓰기가 된다")
+    }
+
+    /// 바쁜 파일(`~/.claude.json`)에서 플랜 필드가 아직 없는 상태를 읽을 수 있다.
+    /// 그때 멀쩡한 값을 빈 줄로 지우면 사용자에겐 그게 곧 결함이다.
+    func testReconcileNeverBlanksAStoredPlanWithAnEmptyReading() async throws {
+        try store.update(personal.id) { $0.tierDescription = "Max 20X" }
+        try writeLiveOAuth(email: "p@x.com", type: nil, tier: nil)
+        try FileManager.default.removeItem(at: env.accountsFile)
+
+        try await switcher.reconcile()
+
+        XCTAssertEqual(store.file.accounts.first { $0.id == personal.id }?.tierDescription,
+                       "Max 20X")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: env.accountsFile.path),
+                       "정보 없는 읽기는 저장도 하지 않는다")
+    }
+
+    /// 라이브 이메일과 짝이 맞는 프로필만 건드린다 — 플랜은 계정마다 다르다.
+    func testReconcileLeavesOtherAccountsAlone() async throws {
+        try store.update(work.id) { $0.tierDescription = "Team" }
+        try writeLiveOAuth(email: "p@x.com", type: "claude_max", tier: "default_claude_max_20x")
+
+        try await switcher.reconcile()
+
+        XCTAssertEqual(store.file.accounts.first { $0.id == personal.id }?.tierDescription,
+                       "Max 20X")
+        XCTAssertEqual(store.file.accounts.first { $0.id == work.id }?.tierDescription, "Team",
+                       "라이브가 아닌 계정의 플랜을 라이브 값으로 덮으면 계정이 뒤섞인다")
+    }
 }
