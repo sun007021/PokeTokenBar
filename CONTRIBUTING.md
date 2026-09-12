@@ -50,7 +50,7 @@ Because the repository squash-merges, the PR title becomes the commit subject on
 - Use [Conventional Commits](https://www.conventionalcommits.org/) style:
   `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, etc.
 - Fill out the pull request template.
-- **UI changes** (anything under `Sources/PokeTokenBar/UI/`) should describe the
+- **UI changes** (anything under `Sources/PokeTokenBarExtended/UI/`) should describe the
   before/after in the PR. Screenshots or GIFs are welcome but optional — a clear
   text description is fine. The canonical `assets/` screenshots are regenerated
   at release, not per PR.
@@ -61,9 +61,9 @@ The app is provider-agnostic by design. When extending it, follow these rules
 (they are also enforced by tests):
 
 - **Adding a usage source** (a new AI CLI) = implement the `UsageProvider`
-  protocol (`Sources/PokeTokenBar/Core/UsageProvider.swift`) in one new type and
+  protocol (`Sources/PokeTokenBarExtended/Core/UsageProvider.swift`) in one new type and
   register it in the default `providers:` array of `UsageStore.init`
-  (`Sources/PokeTokenBar/Core/UsageStore.swift`). Those are the only two places
+  (`Sources/PokeTokenBarExtended/Core/UsageStore.swift`). Those are the only two places
   you should need to touch.
 - **Generic behavior must aggregate across all providers** (today/week/month
   totals, burn tier, companion rhythm). Do not attach a generic calculation to a

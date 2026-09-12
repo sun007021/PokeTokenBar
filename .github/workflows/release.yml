@@ -1,0 +1,80 @@
+name: Release verification
+
+# This workflow does NOT build or upload release assets. It verifies a tag.
+#
+# Why no assets: the app stores credentials in the login Keychain, and macOS binds a
+# Keychain item's "always allow" decision to the signing identity of the app that touches
+# it. An ad-hoc signature (`codesign -s -`, the only thing a runner without a certificate
+# can produce) gets a *new* code identity on every build, so every ad-hoc release would
+# reset that decision and re-prompt every user. scripts/release.sh already gates on a
+# stable signing identity for exactly this reason. A runner cannot reproduce that
+# identity, so the signed .app comes from the release machine and this job is the
+# independent "the tagged commit really is green" record.
+#
+# scripts/build-app.sh is also not CI-safe on its own: its last step pkills the running
+# app and replaces /Applications/PokeTokenBarExtended.app. It is an install script, not a
+# packaging script.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag, branch or SHA to verify'
+        required: true
+        default: 'mobius-integration'
+
+# Never cancel a release verification in flight - a half-checked tag is worse than a slow one.
+concurrency:
+  group: release-verify-${{ github.event.inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify tag
+    # Same runner as ci.yml: macos-15 ships Xcode 16 / Swift 6, which Package.swift requires.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Show Swift version
+        run: swift --version
+
+      # The tag is the only thing users see that separates a fork build from an upstream
+      # build of the same bundle id, so a tag that disagrees with the version baked into
+      # the bundle is a release-blocking defect, not a cosmetic one.
+      - name: Tag matches the version in build-app.sh
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          upstream=$(sed -n 's/^UPSTREAM_VERSION="\(.*\)"$/\1/p' scripts/build-app.sh)
+          fork=$(sed -n 's/^FORK_BUILD="\(.*\)"$/\1/p' scripts/build-app.sh)
+          if [ -n "$fork" ]; then
+            version="${upstream}+mobius.${fork}"
+          else
+            version=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' scripts/build-app.sh)
+          fi
+          tag_version="${GITHUB_REF_NAME#v}"
+          echo "build-app.sh: $version"
+          echo "tag:          $tag_version"
+          [ "$version" = "$tag_version" ] || {
+            echo "::error::tag v$tag_version does not match the version in scripts/build-app.sh ($version)"
+            exit 1
+          }
+
+      # Release configuration, unlike ci.yml's debug build - optimisation-only failures
+      # (and the release-only warnings-as-errors surface) must not first appear on the
+      # release machine.
+      - name: Build (release configuration)
+        run: swift build -c release -v
+
+      # Same gate the release script runs locally: full test suite + line-coverage floor
+      # on the logic core.
+      - name: Test + coverage gate
+        run: ./scripts/test-gate.sh

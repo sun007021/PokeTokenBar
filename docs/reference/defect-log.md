@@ -82,6 +82,32 @@ read_when:
   클램프 자체는 통과해도 `output + thoughts` 처럼 파싱 직후 더하는 곳에서 다시 트랩난다. 합산 여유가 있는
   상한(`maxParsedTokenValue`)을 쓴다. 회귀 가드는 프로바이더별로 **테스트를 쪼개라** — 트랩은 프로세스를
   끝내므로 한 테스트에 몰면 뒤 케이스가 아예 실행되지 않는다.
+- **두 필드 중 하나를 고르는 폴백은 "어느 사용자층에서 테스트했나"가 곧 정답의 범위다.**
+  `~/.claude.json` 의 `organizationType`(플랜: `claude_pro`·`claude_max`)과
+  `organizationRateLimitTier`(rate-limit 티어)는 **다른 축**인데, 카드의 플랜 표시가 티어를
+  무조건 우선했다. Max 에서는 티어가 플랜보다 상세해서(`default_claude_max_20x` → "Max 20X")
+  옳아 보였지만, **Pro 에서는 티어에 플랜 정보가 아예 없다**(`default_claude_ai` =
+  "claude.ai 개인 계정") → 카드에 **`Ai`** 가 찍혔다(사용자 리포트 2026-09-12). 원저자가
+  Max 사용자였다는 것이 그대로 코드의 적용 범위가 된 셈이다. **우선순위를 뒤집는 것은 수정이
+  아니다** — 그러면 Pro 는 고쳐지고 Max 20x 가 "Max" 로 퇴화한다(상세도 손실). 티어는 **플랜을
+  담고 있을 때만** 쓰고 아니면 `organizationType` 으로 폐백한다. 판별은 **관찰한 일반값 하나**
+  (`claude_ai`)만 걸러내는 형태로 좁게 둔다 — 모르는 티어는 예전 그대로라 회귀 면적이 0이다.
+  ★ **파생값을 저장하면 함수를 고쳐도 화면은 안 고쳐진다**: `tierDescription` 은 등록 시점에
+  `AccountStore.upsertProfile` 로 **저장**되고, 원래는 `reconcile`·`adoptLiveAccountIfUnregistered`
+  둘 다 이 필드를 다시 쓰지 않았다(실측: 앱 재시작으로도 `Ai` 가 남았고, 복구는 그 계정으로 다시
+  로그인하는 것뿐이었다). 표시 규칙을 고칠 때는 **저장된 사본이 어디서 갱신되는지**를 같이
+  확인하라. → `reconcile` 이 라이브 신원을 읽어 따라가게 했다(플랜 변경·조직 변경도 자동 반영).
+  값싼 성질은 유지된다: `liveIdentity()` 는 `liveEmail()` 과 **같은 파일 한 번**을 읽고
+  (Claude `~/.claude.json`, Codex `auth.json` 의 id_token) Keychain·네트워크가 없다.
+  ★ 이런 "라이브를 따라가는" 갱신에는 **두 가드가 짝으로** 필요하다 — (1) 값이 실제로 달라진
+  틱에만 쓴다(`AccountStore.update` 가 무조건 `save()` 라, 비교 없이 부르면 정상 상태의 15초
+  틱이 전부 디스크 쓰기가 된다), (2) **빈 값으로 덮어쓰지 않는다**(신원 파일은 바쁜 파일이라
+  플랜 필드가 아직 없는 상태를 읽을 수 있고, 멀쩡한 "Max 20X" 를 빈 줄로 지우는 것이야말로
+  사용자가 보는 결함이다). 이메일과 플랜이 **같은 한 번의 읽기**에서 나온 짝이라 전환 도중에도
+  "A 의 이메일 + B 의 플랜"은 만들어지지 않는다(Keychain↔파일을 각각 읽던 옛 레이스와 다른 점).
+  가드: `ClaudeConfigIOTests` 의 플랜 6건(수정 전 Pro 케이스가 빨갛다) + `AccountStoreTests
+  .testReloginRefreshesAStaleStoredTierDescription` + `SwitcherTests` 의 reconcile 4건
+  (갱신 / 값이 같으면 **저장 없음** / 빈 읽기로 지우지 않음 / 다른 계정 불변).
 
 ## 외부 로그·사용량 소스
 
@@ -332,6 +358,18 @@ read_when:
   안에 보관한다. 객체 동일성 검증과 동시 요청은 유지하며, Sendable 우회 선언을 추가하지 않는다.
   회귀 가드: `SpriteImageCacheTests` 의 두 동시 로드 테스트와 `macos-15` CI의 테스트 컴파일.
   (CI 실패: 2026-09-10.)
+- **`isolated deinit`(SE-0371, 클래스 대상)은 Swift 6.2+ 전용이다.** `AccountsState`(구 Mobius
+  `AppState`)의 안전망 deinit이 로컬 Swift 6.3.3에서는 통과했지만 CI의 Xcode 16.4/Swift 6.1.2에서는
+  `call to main actor-isolated instance method 'stopExternalAppWatch()' in a synchronous nonisolated
+  context`로 실패했다 — `isolated` 키워드 자체가 인식 안 돼 본문이 여전히 nonisolated로 검사된 것.
+  **왜 못 걸렀나:** 위 Sendable 항목과 같은 부류 — 로컬 최신 도구체인은 문법 가용성까지는 검증 못 한다.
+  **도달 가능성부터 확인했다:** 이 deinit은 프로덕션(유일한 인스턴스가 `AppDelegate.accounts`,
+  앱 수명 내내 재대입 없음 — 프로세스 종료로만 없어져 deinit 미도달)·테스트(`MobiusTestSupport.
+  isolatedAccountsState`가 스코프 이탈 전에 항상 `stop()`을 먼저 불러 timer·observer가 이미 nil)
+  양쪽 경로 모두에서 본문이 실행될 때 이미 no-op이었다 — 즉 안전망이 실제로 일을 한 적이 없어
+  이식성과 맞바꿀 이유가 없었다. → deinit 자체를 지우고 `stop()`을 유일한 정상 종료 경로로 남겼다.
+  회귀 가드: `ToolchainPortabilityTests.testSourcesDoNotUseIsolatedDeinit` — `Sources/` 전체에서
+  `isolated deinit` 재등장을 소스 스캔으로 막는다(주입해서 빨간불 확인함). (CI 실패: 2026-09-12.)
 - **SwiftUI `View`/`App` 경계는 `@MainActor` 를 명시한다.** Swift 6.3 은 `body` 밖의 `@ViewBuilder` helper·
   동기 클로저를 nonisolated 로 검사해, `@MainActor` `@Observable` store 접근이 수십 개의 오류로 연쇄된다.
   개별 프로퍼티에 `MainActor.assumeIsolated` 를 흩뿌리지 말고 UI 타입 선언 한 곳에 격리를 둔다.
@@ -340,6 +378,32 @@ read_when:
   `default.profdata` 를 구형 Xcode의 `xcrun llvm-cov` 로 읽으면 `unsupported instrumentation profile format
   version` 으로 테스트 성공 뒤 게이트만 실패한다. `test-gate.sh` 는 현재 `swift` 실경로 옆의 `llvm-cov` 를
   우선하고, sibling이 없는 Apple toolchain에서만 `xcrun --find llvm-cov` 로 폴백한다.
+- **레이아웃 측정 테스트는 윈도우 서버가 없으면 무한대(sentinel)를 돌려준다 — 값이 틀린 게
+  아니라 잴 방법이 없는 것이다.** `AccountsTabLayoutTests` 의 두 테스트
+  (`testAddingTheAccountsTabGrowsTheBarByExactlyOneEvenSegment`,
+  `testTabWidthGuardActuallyRejectsALabelThatWidensTheSegment`)가 GitHub Actions macos-15(헤드리스
+  러너)에서 `XCTAssertEqualWithAccuracy failed: ("1.7976931348623157e+308") is not equal to ("inf")`
+  로 실패했다. 원인은 `.pickerStyle(.segmented)` — AppKit `NSSegmentedControl` 로 브릿지되는 유일한
+  컨트롤이라 진짜 세그먼트 폭을 재려면 윈도우 서버가 필요하다. 없으면 `NSHostingController.
+  sizeThatFits` 가 0/에러가 아니라 SwiftUI 의 "무제한" 센티널(`.greatestFiniteMagnitude`/`.infinity`)을
+  돌려준다. 같은 파일의 카드 폭 테스트(`AccountCardView` 등)는 순수 SwiftUI `Text`/`HStack` 이라
+  이 문제가 없다 — **AppKit 백드 컨트롤만 해당한다**(`Picker(.menu)` 는 실측상 문제 없었다).
+  **왜 못 걸렀나:** 로컬(윈도우 서버 있음)에서는 언제나 통과해 CI 전용 결함이 리뷰·로컬 QA 양쪽을
+  통과했다. → **감지는 환경변수(`CI` 등)가 아니라 측정값으로 한다** — 값 기반 판정은 다른 헤드리스
+  환경(SSH 세션, launchd 데몬)에서도 같은 원인으로 또 깨지는 것을 막고, 환경변수 판정은 원인이 아니라
+  증상(어디서 도는가)만 본다. `.greatestFiniteMagnitude.isFinite == true` 이므로 순수 `isFinite` 검사로는
+  절반(그 값)을 놓친다 — 값이 비현실적으로 큰지(`!isFinite || >= 100_000`)까지 같이 봐야 한다.
+  실패하는 두 assertion **직전**에서 `throw XCTSkip("...")` 하고, 스킵 메시지에 원인(윈도우 서버 부재)을
+  적어 사람이 읽을 수 있게 한다 — 이미 이 저장소가 쓰는 관용구(`PTB_PARITY`/`PTB_COST_AUDIT` 가드류와
+  같은 자리, 값 기반이라는 점만 다르다). **주입 검증**: 판정 임계값을 일부러 항상 참이 되게 바꿔
+  스킵이 실제로 걸리는지 확인한 뒤 되돌렸다(결함 프로토콜 3 — 가드가 작동하는지 확인 없이 넣지 않는다).
+  **부류 스윕**: `Sources/` 전체에서 `.pickerStyle(.segmented)` 를 쓰는 다른 두 자리
+  (`SettingsView.swift` 의 `limitDisplayMode`, `CompanionView.swift` 의 도감/포획로그 토글)는 어느
+  레이아웃 테스트도 `sizeThatFits` 로 재지 않아 안전하다. `AccountSwitchingSettingsTests` 의
+  `thresholdPicker` 는 `.pickerStyle(.menu)` 라 이 부류가 아니다(CI 에서도 통과 확인).
+  새 레이아웃 테스트를 쓸 때: 재려는 뷰가 `Picker(.segmented)`(또는 다른 AppKit 백드 컨트롤)를
+  포함하면 측정값이 센티널인지부터 가드하고, 순수 SwiftUI 뷰(`Text`/`HStack`/커스텀 `View`)만 재는
+  테스트는 이 문제가 없다는 것도 함께 확인해 둔다.
 
 ## 자격증명·Keychain
 
@@ -422,6 +486,55 @@ read_when:
 
 ## 동시성
 
+- **"멈춤"을 타이머·옵저버 철거로만 정의하면 진행 중인 작업이 계약 밖에 남는다 — 수명주기의 `stop()`
+  은 자기가 띄운 `Task` 를 전수 취소해야 한다.** `AccountsState.stop()` 은 타이머를 무효화하고 외부
+  변경 옵저버를 걷었지만, `start()` 의 **마지막 줄이 곧바로 띄우는 틱**과 게이지 조회·폴백 검증
+  태스크는 그대로 살아 있었다. 그래서 "끄면 아무것도 안 돈다"는 계약이 깨지는 정도가 아니라, 방금 끈
+  기능이 **계정을 전환하고 알림까지 띄울 수 있었다**(틱이 자동 전환까지 수행하므로). 증상이 화면에
+  안 보이는 부류라 사용자는 신고할 수도 없고, "타이머가 nil 이 됐다"는 관찰로는 영영 안 걸린다.
+  → 세 가지가 함께 필요하다: ① `stop()` 에서 `cancel()`, ② **취소는 중단이 아니므로**(이미 큐에 오른
+  태스크는 취소돼도 몸체를 돌기 시작하고, `await` 가 전부 취소 인지형인 것도 아니다) 부작용을 내는
+  **관문에서 `Task.isCancelled` 를 직접 확인**, ③ 핸들을 `cancel()` 시점이 아니라 **태스크가 실제로
+  끝날 때** 비우기(먼저 비우면 살아 있는 태스크가 참조를 잃어 다음 `start()` 가 두 번째 핸들을 만든다).
+  ★ **취소해도 되는지는 "자격증명을 반쯤 쓴 상태가 남는가"로 판단한다.** 여기서 취소가 안전했던 이유는
+  자격증명을 쓰는 구간이 전부 **동기**이거나(`switcher.switchTo`, `store.withCredentialLock` 블록)
+  취소가 전파되지 않는 `Task {}` 쉴드 안(`FallbackAuthChecker.inFlight`, codex 토큰 회전)이라, 서버가
+  회전 토큰을 소비한 뒤 저장 전에 끊기는 경로가 **구조적으로 없기** 때문이다. 반대로 Desktop 프로필
+  스왑(`desktopSwitchTask`)과 가이드 캡처(`desktopCaptureTask`, 원래 로그인을 stash 해 둔 상태)는
+  끊으면 반쯤 옮겨진 상태로 남으므로 **일부러 취소하지 않는다** — 예외는 코드가 아니라 목록으로 남겨
+  테스트가 읽게 한다(`AccountsEngineLifecycleTests.deliberatelyNotCancelled`).
+  재발 방지는 **부류 스윕의 자동화**다: 같은 파일의 모든 `Task` 필드는 `stop()` 에서 취소되거나 그
+  목록에 이유와 함께 적혀 있어야 한다(둘 다 아니면 테스트 실패). 필드가 늘 때마다 되풀이되는 실수라
+  기억이 아니라 기계로 막는다.
+
+- **부류 스윕의 소스 스캐너는 `필드에 담긴` Task만 본다 — 익명 `Task { ... }` 는 애초에 안 보인다.**
+  위 부류 스윕이 잡는 것은 "필드는 있는데 `stop()` 이 빠뜨린 경우"뿐이다. `manualSwitch(to:)`
+  (전환 두 곳)와 `addAccount()` 가 핸들을 필드에 담지 않고 `Task { @MainActor in ... }` 를 그
+  자리에서 던져 놓고 있었다 — 스캐너의 정규식(`var … : Task<…>`)에 애초에 걸릴 수가 없어 스윕은
+  "이상 없음"으로 계속 통과했다(코드 리뷰로 발견, #22). 피해는 두 겹이다: ① `stop()`/이중 writer
+  가드가 물러나도 이 작업들은 계속 돈다(추적 안 되는 작업이니 취소 대상 목록에도 못 들어간다).
+  ② `manualSwitch` 는 재진입 가드조차 없어서, 두 계정을 빠르게 연속 클릭하면 독립된 두 Task가
+  경합해 **나중에 끝난 쪽이 이겼다**(사용자가 마지막에 누른 계정과 최종 활성이 달라짐, 안내도 없음).
+  → 세 Task 모두 필드로 승격했다(`manualSwitchTask`·`addAccountTask` — 위 부류의 `stopEngine()`
+  취소 목록에 추가; `endDesktopCapture()` 의 stash 복원 Task도 같은 함정이라 `desktopCaptureRestoreTask`
+  로 승격했지만 **취소하지 않는 예외**로 등록했다 — 시작 전에 `desktopCaptureStash` 를 이미 nil로
+  비우므로 그 Task 자체가 stash 를 되돌릴 유일한 경로라 끊으면 되돌릴 방법이 없어진다).
+  안전성 판정은 위와 같은 기준("자격증명을 반쯤 쓴 상태가 남는가")을 그대로 적용했다: `manualSwitch`
+  의 자격증명 쓰기(`performSwitch`)는 동기라 취소는 그 앞의 `await`(preflight)에서만 걸리고,
+  `addAccount` 는 `LoginFlowController.run()` 의 등록 구간이 라이브 스냅샷을 안정 감지한 **뒤에만**
+  도는 동기 블록이라 마찬가지다 — 감지 전에 끊기면 `cleanup()` 이 PTY·인증창·임시파일을 정리하고,
+  드물게 CLI가 이미 로그인을 끝냈는데 우리가 못 봤다면 엔진 재개 시 `tick()` 의
+  `adoptLiveAccountIfUnregistered()` 가 그 계정을 자동으로 흡수한다(Desktop stash 와 달리 되돌릴
+  장치가 없는 게 아니라 엔진 재개가 스스로 되돌린다). `manualSwitch` 의 재진입 가드는
+  `desktopSwitchTask` 와 같은 패턴(진행 중 필드가 non-nil이면 조용히 버리지 않고 배너로 알림)으로
+  막았다 — 가드 자체를 `manualSwitchTask` 필드로 겸용해 새 상태를 늘리지 않았다.
+  회귀 가드: `ManualSwitchReentrancyTests`(재진입 차단 + 완료 후 해제 — 가드가 안 풀리면 그게 더
+  나쁜 결함이라 함께 확인), 그리고 기존 `AccountsEngineLifecycleTests` 스윕이 이제 세 필드를 전부
+  본다(하나씩 `stopEngine()` 취소 줄을 빼 실제로 빨간불이 되는 것을 확인하고 되돌렸다).
+  교훈: 부류 스윕을 "필드 목록을 스캔"으로 자동화했다면, **그 스캐너 자체가 어떤 모양은 볼 수
+  없는지**(익명 리터럴, 다른 타입 별칭 등)를 스윕 대상에 포함해 주기적으로 물어야 한다 — 스캐너가
+  통과시키는 것과 "결함이 없는 것"은 다르다.
+
 - **비동기 완료가 "그 사이 교체된 대상"에 착지하지 않게 하라 — 상태를 통째로 바꾸는 경로를 새로 만들면
   진행 중인 await 를 전수 점검한다.** 이 레포가 세 번 겪은 부류다(#136·#138 스프라이트, 그리고 세이브
   불러오기 중 부화). `isHatching` 같은 중복 실행 락은 *같은 작업의 재진입*만 막을 뿐, await 창에서 상태가
@@ -474,6 +587,25 @@ read_when:
   `writeAndFlush` 로 묶는다. `AppLog.writeAndFlush` 는 테스트된 `backend.writeAndFlush` 를
   타야 한다 — `write()`+`flush()` 두 번째 쌍은 가드가 안 되고, `flush()` 만 빼면 스위트가
   초록인데 #174 가 다시 산다. (#174)
+- **외부 CLI 의 경로를 `zsh -lc` 로 찾지 마라 — 버전매니저 설치가 통째로 안 보인다.** 비대화형
+  로그인 셸은 `.zshrc` 를 읽지 않는다. nvm·mise·asdf 는 PATH 주입을 거기서 하므로
+  `~/.nvm/versions/node/<ver>/bin/claude` 같은 설치는 **설치돼 있는데 "없음"** 이 된다(실측:
+  계정 추가가 "Claude Code CLI 가 필요합니다" 로 막혔다 — 그 Mac 에 claude 는 있었다).
+  같은 자리에서 두 번째 함정이 겹친다: rc 는 stdout 에 장식 문구를 찍을 수 있어
+  `command -v` 출력의 **첫 줄을 경로로 삼으면** 실행 불가 경로가 나온다. 버전 디렉터리를
+  고정 후보에 박는 것은 해법이 아니다 — 버전이 올라가면 조용히 낡는다. 이 저장소의 답은
+  이미 있었다: `BinaryLocator.resolve` 가 대화형 로그인 셸(`-ilc`)로 찾고 결과를 마커
+  (`<<<BIN:…:BIN>>>`)로 감싸 두 함정을 **구조적으로** 없앤다. Codex 는 처음부터 그 경로를
+  써서 같은 Mac 에서 멀쩡했고, 이식해 온 Claude 쪽만 자기 해석기를 들고 있었다 —
+  §외부 로그·사용량 소스의 "형제 인프라를 우회한 탓" 과 같은 부류다. 새 외부 도구를 부를 때
+  경로 해석은 `BinaryLocator` 한 곳이고, 실행 환경은 `BinaryLocator.augmentedEnvironment`
+  (해석된 실행파일의 **자기 디렉터리**가 맨 앞 — nvm 은 node 가 claude 옆에 있다)로 만든다.
+  **탐색은 메인 스레드에서 기다리지 않는다**: 대화형 셸은 실측 0.9초, 상한 8초라 버튼 핸들러가
+  그대로 UI 정지가 된다(`AccountsState.addAccount` 는 `Task.detached` 뒤로 옮겼다).
+  회귀 가드는 `ClaudeCLIResolutionTests` — 셸 **스텁**으로 "그 디렉터리는 rc 만 PATH 에 넣는다"
+  와 "rc 가 stdout 에 장식을 찍는다"를 재현한다(개발자 Mac 의 실제 설치에 의존하면 머신마다
+  판정이 갈려 아무것도 못 지킨다). 수정 전 구현으로 되돌리면 5건 중 3건이 빨개지는 것을
+  확인했다. (사용자 리포트: 계정 추가 실패, 2026-09-12.)
 
 ## 표시·UI
 
@@ -579,7 +711,7 @@ read_when:
   #210 이 이 경로로 한국어 3줄(`PopoverView` 세션만료 안내)을 넣어 전 언어 사용자에게 한국어가 보일
   뻔했다. 가드가 답하는 질문("번역이 인자를 지켰나")과 결함의 질문("이 문구가 번역 대상이긴 한가")이
   다른 층이다. 그래서 표를 검사하지 말고 **소스를 스캔**한다(`LocalizedUILiteralTests`):
-  `Sources/PokeTokenBar/UI/**` 의 문자열 리터럴에 한글이 있으면 실패. 한국어 *주석*은 하우스 스타일이라
+  `Sources/PokeTokenBarExtended/UI/**` 의 문자열 리터럴에 한글이 있으면 실패. 한국어 *주석*은 하우스 스타일이라
   허용해야 해서 정규식이 아니라 문자 순회로 문자열/주석 상태를 추적한다 — `"https://x//경로"` 처럼
   리터럴 안의 `//` 를 주석으로 오인하면 진짜 결함을 놓친다(역검증에서 이 케이스로 반증함).
   새 프로바이더 UI 를 붙일 땐 같은 부류의 형제 문구(여기선 `claudeAuthExpiredTitle/Hint`)를 먼저 찾아
@@ -673,6 +805,50 @@ read_when:
   `testTransientSurfaceIsTheOnlyUncappedOne` — 캡=0 주입으로 실패 확인). 상시 표시 표면을 더할 땐
   캡을 반드시 **이름 있는 값**으로 두고 `>0` 를 단정한다. occlusion 게이팅은
   all-spaces/`.floating` 펫이 실제로 거의 안 가려져 메뉴바와 동일 수확체감으로 미도입. (#102 리뷰 지적 반영, 2026-07-22.)
+- **"주기적으로 확인"을 타이머로 쓰기 전에 알림이 있는지 본다 — 그리고 진짜 폴링은 타이머가 아니라
+  가드 호출부에 숨어 있을 수 있다.** 이식된 이중 writer 가드(`AccountsState`)는 5초 타이머로
+  `NSRunningApplication` 을 조회했는데, 같은 판정을 `NSWorkspace` 의 실행/종료 알림으로 받으면
+  **유휴 wakeup 이 0** 이 된다(변화가 있을 때만 온다). 다만 알림은 **구독 이후의 변화만** 주므로
+  ① 시작 시점의 초기 상태는 `start()` 가 직접 한 번 판정해야 하고, ② 배달을 놓치는 경로(종료
+  알림과 `isTerminated` 반영의 레이스 등)가 남으므로 **저빈도 안전망 타이머(60초)는 남긴다** —
+  폴링 제거가 목적이지 안전장치 약화가 아니다. 자격증명을 쓰는 경로는 원래대로 그 자리에서 다시
+  판정하므로(`externalAppBlocksSwitching()`) 최악 지연은 UI 배너와 엔진 재개에만 걸린다.
+  ★ **더 컸던 쪽은 타이머가 아니었다** — 그 재조회가 자동 전환 결정 적용부(`apply`) 입구에 있어
+  **프로바이더마다 매 틱(3초)** 불렸다. 즉 5초 타이머 12회/분 옆에서 40회/분이 더 돌고 있었다.
+  결정이 `.none`(평시)이면 자격증명도 알림도 안 건드리므로 가드가 지킬 것이 없다 → `.none` 은
+  가드보다 **먼저** 반환한다. 가드는 **쓰기 직전**에만 두라는 것이 규칙이고, 입구에 두면 비용이
+  호출 빈도에 그대로 비례한다. 회귀 가드는 `MobiusCoexistenceGuardTests` — 구독 개수·양방향
+  알림 배달·"평시 틱은 조회 0" 을 각각 주입으로 실패 확인했다. (2026-09-12.)
+- **하우스 규율은 이식된 코드에 자동으로 적용되지 않는다 — 타이머를 들여올 땐 tolerance 부터
+  본다.** 이 앱의 타이머는 전부 `Timer.tolerance` 로 wakeup 을 코얼레싱하는데(위 항목들),
+  이식된 Mobius 타이머 둘(3초 엔진 틱·외부 앱 감시)만 그 규율 밖에 있었다. 값은 기존과 같은
+  **0.1** 이되, **대가의 축이 다르다는 것을 함께 적는다**: 메뉴바에서 배수는 "재생이 늘어질 수
+  있는 상한"이었지만 자동 전환에서는 **"전환이 늦어질 수 있는 상한"** 이다(3초 틱 → 최악
+  +0.3초. 그 뒤에 usage API 왕복과 `HitAttribution.cooldown` 180초가 이어지므로 묻힌다).
+  가드는 `MobiusTimerEnergyTests` — `FloatingPetEnergyTests` 와 같은 모양으로 **캡 존재(>0)**
+  와 **상한(≤15%)** 을 둘 다 잠그고, 주기 리터럴 드리프트도 이름 있는 상수와 대조한다
+  (tolerance=0 주입으로 실패 확인). (2026-09-12.)
+- **주기 작업의 비용이 입력 크기에 비례하면, 그 작업에는 "지금 볼 것이 있는가" 게이트를 붙인다 —
+  단 게이트가 정확성 창을 넓히지 않는지 따로 확인한다.** 계정 전환 틱(3초) 안에서 비용이 로그
+  트리 크기에 비례하는 유일한 작업은 세션 로그 스캔(열거 + 파일당 stat)이고, 실측 환경
+  (Claude 205MB/147개 + Codex 548MB/515개)에서 이 앱의 유휴 CPU 를 올리는 단일 항목이었다.
+  게이트 신호는 **워처가 이미 들고 있는** `lastActivity` 를 쓰고, 판정 기준은 워처 **자신의**
+  `recentWindow` 를 그대로 쓴다 — 그 창보다 오래된 파일은 스캔해도 파싱 대상에서 걸러지므로
+  "마지막 활동이 그 창 밖"은 임의의 휴리스틱이 아니라 **직전 스캔이 구조적으로 이벤트를 낼 수
+  없었다**는 뜻이다. 잃는 것이 없음도 각각 확인했다: 오프셋이 유지되므로 **데이터**는 안 잃고,
+  `recentWindow`(600초) ≫ 유휴 주기(15초)라 건너뛰는 사이 파일이 창 밖으로 못 나가며, 신호가
+  자기참조처럼 보이지만 유휴에도 15초마다는 돌아 새 활동은 늦어도 그 안에 잡힌다.
+  ★ **정확성 창은 별도 검사가 필요했다.** `CodexStatusRouter` 는 활성이 바뀐 순간의
+  `trackedFiles`(= 직전 스캔 완료 시점 스냅샷)로 전환 전 세션 파일을 격리하는데, 스캔 주기를
+  늘리면 **그 창도 같이 넓어져** 전환 직전에 시작된 세션이 격리되지 않는다(= 옛 계정 사용량이
+  새 계정에 박혀 연쇄 전환). 그래서 **활성이 바뀐 틱은 유휴여도 반드시 스캔한다** — 창이 스캔
+  주기가 아니라 틱 주기(3초, 기존과 동일)로 유지된다. 에너지 게이트를 넣을 때 "무엇이 늦어지나"
+  뿐 아니라 **"어떤 값의 신선도를 전제하는 소비자가 있나"** 를 같이 훑어야 하는 이유다.
+  남는 대가는 지연 하나: 로그가 완전히 조용했던 뒤 도착하는 **첫** hit 의 검출이 최악 +12초
+  (그 뒤엔 활동이 최신이라 매 틱으로 복귀). 소진 판정은 이어서 usage API 왕복과
+  `HitAttribution.cooldown` 180초를 더 태우므로 전환 지연의 지배 항이 아니다.
+  가드는 `MobiusScanCadenceTests`(순수 판정 4 + 배선 2 — 활성 변경 강제를 지우면 배선 테스트가
+  실패하는 것까지 확인). (2026-09-12.)
 
 ## 알림
 
@@ -682,6 +858,28 @@ read_when:
   발화, 경고선 아래로 내려가면 재무장)로 구현하고, 판정은 부수효과(실 알림 전송·`.app` 번들 가드)와
   분리한 **순수 함수**(`UsageStore.evaluateLimitAlerts`)로 테스트한다 — 번들 가드 때문에 실 발화 경로는
   xctest 에서 조기 return 되어 커버 불가였던 게 무테스트의 원인.
+
+- **번들을 요구하는 API 는 `AppEnv.isBundledApp` 뒤에 둔다 — 없으면 raw 바이너리 실행이 시작 즉시 죽는다.**
+  `UNUserNotificationCenter.current()` 는 번들 프로세스가 아니면 `NSInternalInconsistencyException`
+  (`bundleProxyForCurrentProcess is nil`)을 **던진다**. 실패 모드가 "알림이 안 간다"가 아니라
+  **프로세스 사망**이라 게이트는 취향이 아니라 필수다. PTB 는 이미 `UsageStore`·`CompanionStore`·
+  `AppLog` 에서 이 규율을 지키고 있었는데, 이식한 Mobius 코드(`AccountsState.start()` 의 권한 요청,
+  `AccountsState.notify()`)가 따르지 않아 `-mobius.enabled YES ./.build/debug/PokeTokenBar` 가
+  메뉴바 아이콘이 뜨기 전에 죽었다. **왜 1,368개 테스트가 못 잡았나:** 테스트도 번들이 아니므로
+  조건은 매 실행 성립해 있었는데, **아무 테스트도 그 함수를 부르지 않았다** — `AccountsState` 를
+  건드리는 유일한 테스트(`MobiusLaunchSequenceTests`)가 `accountStateCreation` 단계를 실제 호출이
+  아니라 **파일 연산으로 대역 재생**해서다(순서 계약을 보기엔 옳지만 생성자·`start()` 본문은 한 줄도
+  안 돈다). 커버리지도 증거가 아니었다 — 해당 줄은 line coverage 상 `^0` 이다.
+  **회귀 가드는 "가드가 있나"가 아니라 진짜 트리거를 밟는다**(`MobiusBundleGuardTests`):
+  `swift test` 자체가 번들이 아니므로 합성 `MobiusEnvironment`(임시 home + keychain 에 없는
+  `localUser`)로 `AccountsState` 를 만들어 `start()` 와 `notify()` 를 그대로 부른다 — 가드를 지우면
+  실제로 `AccountsState.swift:320` 에서 예외가 나며 빨간불(확인함). 소스 스캔 1건
+  (`testEveryNotificationCenterUseInMobiusSourcesIsGuarded`)이 **앞으로 추가될** 사용처까지 덮는다
+  (`Sources/PokeTokenBarExtended/Mobius/` 의 `UNUserNotificationCenter` 줄은 같은 함수 안에 선행
+  `AppEnv.isBundledApp` 이 있어야 한다). 부류 스윕에서 함께 본 것: `LoginFlow` 의
+  `ASWebAuthenticationSession` 은 번들 밖에서도 **던지지 않고** 에러로 실패한다(실측: init 통과,
+  `start()` 가 false + `Code=2` 에러) — 도달 가능하지만 결함 트리거가 아니라 가드를 넣지 않았다.
+  `Sources/PokeTokenBarExtended/Mobius/` 에 `Bundle.main`·`Bundle.module`·`SMAppService` 사용처는 0개다.
 
 ## 상태 파일 이전·병합
 

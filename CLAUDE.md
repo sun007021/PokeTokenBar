@@ -1,4 +1,4 @@
-# PokeTokenBar — Claude 프로젝트 지침
+# PokeTokenBarExtended — Claude 프로젝트 지침
 
 이 파일은 **매 세션 전문이 로드된다.** 그래서 여기엔 *항상 적용되는 규칙*만 둔다.
 길고 상황별인 절차는 `docs/reference/` 로 내리고 아래 인덱스에서 "언제 읽는가"로 가리킨다.
@@ -11,6 +11,7 @@
 | `docs/reference/release-workflow.md` | 버전을 배포할 때, `release.sh` 게이트에 막혔을 때, UI 변경으로 스크린샷·랜딩을 갱신할 때 |
 | `docs/reference/provider-extension.md` | 새 사용량 소스·버전매니저·로그 루트를 추가할 때, 프로바이더 분기를 리뷰할 때 |
 | `docs/reference/defect-log.md` | 결함·회귀를 고치는 중(부류 스윕 근거), 동시성·캐시·외부 로그 포맷·대용량 파일 읽기·상시 애니메이션·세이브 이전을 건드릴 때 |
+| `docs/reference/mobius-integration.md` | mobius 통합 관련 코드를 만질 때, 상류(chattymin/PokeTokenBar) 변경을 rebase 할 때, 계정 전환·자격증명 경로를 리뷰할 때 |
 
 각 문서의 frontmatter(`summary`/`read_when`)가 그 문서의 적용 범위를 다시 명시한다.
 
