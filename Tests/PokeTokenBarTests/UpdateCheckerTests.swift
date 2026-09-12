@@ -57,6 +57,16 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertTrue(UpdateChecker.isNewer("2.5.4-rc1", than: "2.5.3+mobius.1"))
     }
 
+    /// 상류 cask 업그레이드는 확인창 없이 앱을 종료하고 번들을 상류 빌드로 교체한다(같은 번들
+    /// ID·같은 설치 경로) → 포크의 계정 전환 기능이 조용히 사라진다. 지금은 사용자가 cask 를
+    /// 지워 경로가 죽어 있지만 재설치 한 번이면 되살아나므로, 코드에서 닫혀 있는지를 잠근다.
+    func testForkNeverTakesTheBrewCaskUpgradePath() {
+        XCTAssertFalse(
+            UpdateChecker.allowsBrewCaskUpgrade,
+            "a cask upgrade replaces this fork with the upstream build without confirmation"
+        )
+    }
+
     func testDetachedUpgradeScriptWaitsOnPidNotProcessName() {
         let script = UpdateChecker.detachedUpgradeScript
         XCTAssertFalse(

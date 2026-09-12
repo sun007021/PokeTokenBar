@@ -53,6 +53,18 @@ final class UpdateChecker {
         available = nil
     }
 
+    /// 이 포크는 **상류 cask 업그레이드 경로를 타지 않는다.**
+    /// `brew upgrade --cask poke-token-bar` 는 확인창 하나 없이 앱을 종료하고 번들을 상류
+    /// 빌드로 교체한다 — 포크와 상류가 같은 번들 ID·같은 설치 경로를 쓰므로 계정 전환 기능이
+    /// 조용히 사라진다. 지금은 사용자가 cask 를 지워 `brewCaskPath()` 가 nil 이지만, 한 번이라도
+    /// 재설치되면 그 경로가 그대로 되살아나므로 코드에서 닫는다.
+    /// 업데이트 **알림은 그대로 받는다**(상류 변경을 놓치지 않기 위한 사용자 결정) — 적용은
+    /// 릴리스 페이지를 여는 것으로 끝나고, 상류로 갈아탈지는 사람이 결정한다. 포크에서
+    /// 올바른 갱신 방법은 `git fetch upstream && git rebase upstream/main` 후 재빌드다
+    /// (docs/reference/mobius-integration.md §상류 rebase).
+    /// 상류 rebase 시 이 한 줄이 포크의 결정 지점이다 — 지우면 덮어쓰기 경로가 돌아온다.
+    nonisolated static let allowsBrewCaskUpgrade = false
+
     /// 업데이트 적용: brew cask 설치본이면 `brew upgrade` 후 재시작, 아니면 릴리스 페이지.
     func applyUpdate() {
         guard let update = available, !isUpdating else { return }
@@ -60,13 +72,16 @@ final class UpdateChecker {
         Task { @MainActor in
             // brew cask 설치본이면 분리(detached) 스크립트가 앱 종료 후 tap 갱신→업그레이드→재오픈.
             // 그 외(brew 미설치/비-cask 설치)면 릴리스 페이지를 연다.
-            let brew = await Task.detached { Self.brewCaskPath() }.value
+            let brew = Self.allowsBrewCaskUpgrade
+                ? await Task.detached { Self.brewCaskPath() }.value
+                : nil
             if let brew {
                 Self.launchDetachedUpgrade(brew: brew)
                 NSApp.terminate(nil)
             } else {
                 isUpdating = false
-                AppLog.write("update: brew cask 아님/brew 미설치 → 릴리스 페이지 열기")
+                AppLog.write(
+                    "update: cask 업그레이드 비활성(포크)/brew cask 아님 → 릴리스 페이지 열기")
                 if let u = URL(string: update.url) { NSWorkspace.shared.open(u) }
             }
         }
