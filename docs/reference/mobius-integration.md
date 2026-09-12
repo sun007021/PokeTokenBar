@@ -211,3 +211,22 @@ PokeTokenBar 는 `@Observable`(Observation), Mobius `AppState` 는 `@Published` 
 감지기는 `AccountsState` 에 주입한다. 진짜 `NSRunningApplication` 조회를 그대로 두면 **개발자
 Mac 에 Mobius.app 이 떠 있는지에 따라 스위트 전체가 흔들리므로**, `MobiusTestSupport` 의 기본값은
 "안 돌고 있다"이고 가드 자체는 `MobiusCoexistenceGuardTests` 가 양쪽 값을 주입해 검증한다.
+
+### 전환 후 한도 캐시 무효화
+
+`OAuthAccessTokenCache`(PokeTokenBar 쪽)는 Claude 자격증명을 인메모리로 들고 있어, 계정을 바꿔도
+**옛 토큰으로 조회가 성공한다.** 증상은 "한도가 안 나온다"가 아니라 **A 계정 숫자가 B 계정 게이지로
+그려지는 것**이라 화면만 봐서는 틀렸다는 걸 알 수 없다(`CredentialSwitchCacheTests` 가 잠근 #227 과
+같은 부류).
+
+- **통지 지점**: `AccountsState.onSwitched` — `switcher.switchTo` **성공 직후**. 자동(`apply`)·
+  수동(`performSwitch`)이 서로 다른 경로라 **양쪽 모두**에 건다. 실패(throw)하면 부르지 않는다 —
+  멀쩡한 토큰을 버리고 재조회를 부르는 것이 이 기능의 유일한 비용이다.
+- **결합 위치**: `AppDelegate.wireAccountSwitchToLimits()`. `AccountsState` 와 `UsageStore` 는
+  서로를 모르고 둘 다 들고 있는 것은 델리게이트뿐이라, 새 전역 상태 대신 `store.onRefresh` 와 같은
+  콜백 관례를 쓴다.
+- **프로바이더 구분**: `MobiusSwitchSideEffects.invalidatesClaudeLimitCache` — Codex 한도는
+  세션 로그에서 오므로 이 캐시와 무관하다. 안 가르면 Codex 전환마다 헛된 Claude 재조회가 붙는다.
+- **재조회**: `UsageStore.refresh()`. 진행 중이면 그쪽이 코얼레싱해 완료 후 1회 더 도므로, 옛
+  토큰으로 끝난 조회가 최종값으로 남지 않는다. `refreshLimitTokenFromKeychain()` 은 쓰지 않는다 —
+  `allowKeychainPrompt: true` 라 전환 때마다 키체인 승인창을 부를 수 있다.

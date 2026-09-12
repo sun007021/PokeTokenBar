@@ -99,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         updater = UpdateChecker()
         store.localizationLanguage = companion.language   // 알림 현지화용 미러 시드
         store.onRefresh = { [weak self] in self?.onStoreRefreshed() }   // 한도 로드 후 companion·사탕 지급
+        wireAccountSwitchToLimits()
         floatingPet = FloatingPetController(
             store: store, companion: companion,
             onOpenPopover: { [weak self] in self?.openPopover() },
@@ -522,6 +523,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let new = base.appendingPathComponent("PokeTokenBar")
         guard fm.fileExists(atPath: old.path), !fm.fileExists(atPath: new.path) else { return }
         try? fm.moveItem(at: old, to: new)
+    }
+
+    /// 계정 전환 ↔ 한도 캐시의 **유일한 접점.** 두 계층은 서로를 모르고, 둘 다 들고 있는 것은
+    /// 이 델리게이트뿐이라 결합을 여기에 둔다(`store.onRefresh` 와 같은 자리·같은 관례).
+    ///
+    /// 무엇을 고치는가: `OAuthAccessTokenCache` 는 Claude 자격증명을 인메모리로 들고 있다.
+    /// 계정을 바꾸면 그 캐시는 **이전 계정 토큰**이라, 한도 게이지가 A 계정 숫자인데 활성은 B 인
+    /// 상태가 된다 — 조회가 실패하는 게 아니라 성공한 옛 값이 그려지므로 화면만 봐선 모른다.
+    /// 캐시를 버리고 `refresh()` 로 새 토큰 기준 한도를 다시 받는다(진행 중이면 `UsageStore` 가
+    /// 코얼레싱해 완료 후 1회 더 돈다 — 옛 토큰으로 끝난 조회가 최종값으로 남지 않는다).
+    ///
+    /// 배선 시점이 `accounts.start()` 보다 **뒤**여도 안전하다: `start()` 가 띄우는 첫 틱은
+    /// 메인 액터 `Task` 라 `applicationDidFinishLaunching` 이 끝나기 전에는 실행되지 않는다.
+    private func wireAccountSwitchToLimits() {
+        accounts.onSwitched = { [weak self] provider in
+            guard MobiusSwitchSideEffects.invalidatesClaudeLimitCache(provider) else { return }
+            Task { @MainActor [weak self] in
+                await OAuthAccessTokenCache.shared.invalidate()
+                await self?.store.refresh()
+            }
+        }
     }
 
     /// 독립 Mobius.app 데이터 1회 이전. **실패해도 앱 시작을 막지 않는다** — 계정 전환은 부가

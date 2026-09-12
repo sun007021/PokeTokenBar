@@ -502,6 +502,14 @@ final class AccountsState: ObservableObject {
     /// 있어야 자동 재개가 성립한다(없으면 사용자가 앱을 재시작해야 복구된다).
     var externalAppWatchTimerForTesting: Timer? { externalAppWatchTimer }
 
+    /// 전환이 **실제로 성사된 뒤** 호출된다 — 자동(`apply`)·수동(`performSwitch`) 두 경로가
+    /// 모두 지나며, 전환이 throw 하면 호출되지 않는다.
+    ///
+    /// 호스트 앱이 자기 캐시를 버릴 자리다. `AccountsState` 는 PokeTokenBar 의 사용량 계층을
+    /// 모르고 알 필요도 없으므로(둘 다 들고 있는 것은 `AppDelegate` 다), 새 전역 상태를 만드는
+    /// 대신 `UsageStore.onRefresh` 와 같은 콜백 관례를 따른다.
+    var onSwitched: (@MainActor (Provider) -> Void)?
+
     /// 자격증명을 실제로 쓰는 경로의 공통 관문. 막혀 있으면 `true` 를 돌려주고 호출부는
     /// 아무것도 하지 않는다.
     ///
@@ -1541,6 +1549,9 @@ final class AccountsState: ObservableObject {
             if provider == .codex { await quiesceCodexUsageTask() }
             do {
                 try switcher.switchTo(id)
+                // 자동 전환 쪽 뒤처리 통지. 수동 전환은 `performSwitch` 가 같은 일을 한다 —
+                // 두 경로가 갈라져 있어 한쪽만 배선하면 그쪽 전환에서만 게이지가 낡는다.
+                onSwitched?(provider)
                 engines[provider]?.noteSwitched(now: now,
                                                 forModelLimit: reason == .modelExhausted,
                                                 leftAccount: fromID)
@@ -1640,6 +1651,8 @@ final class AccountsState: ObservableObject {
         let fromID = store.file.activeByProvider[provider]
         do {
             try switcher.switchTo(id)
+            // 수동 전환 쪽 뒤처리 통지 — 자동(`apply`)과 **다른 경로**라 따로 배선한다.
+            onSwitched?(provider)
             engines[provider]?.noteSwitched()
             // 사용자가 직접 고른 계정 — 모델 전용 한도(Fable 등)로 자동으로 밀어내지 않는다.
             try? store.setUserPinned(id)

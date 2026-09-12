@@ -184,11 +184,15 @@ final class MobiusCoexistenceGuardTests: XCTestCase {
         let state: AccountsState
         let personal: AccountProfile
         let work: AccountProfile
+        /// 전환을 **실패시키는** 주입 지점(`failWritesForService`). 성공 경로만 테스트하면
+        /// "성사되지 않은 전환에서는 뒤처리를 하지 않는다" 같은 순서 계약을 확인할 수 없다.
+        let keychain: InMemoryKeychain
 
         var activeID: UUID? { state.store.file.activeByProvider[.claude] }
 
         init(test: XCTestCase, externalMobiusRunning: @escaping @MainActor () -> Bool) throws {
             let keychain = InMemoryKeychain()
+            self.keychain = keychain
             state = try MobiusTestSupport.isolatedAccountsState(
                 cleanupWith: test, keychain: keychain,
                 externalMobiusRunning: externalMobiusRunning)
