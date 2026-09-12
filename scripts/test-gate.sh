@@ -43,6 +43,8 @@ LOGIC_CORE=(
   "Sources/PokeTokenBarExtended/Core/LocalUsageCache.swift"
   "Sources/PokeTokenBarExtended/Core/ModelPricing.swift"
   "Sources/PokeTokenBarExtended/Core/CustomScanRoots.swift"
+  "Sources/PokeTokenBarExtended/Core/StateDirectoryMigration.swift"
+  "Sources/PokeTokenBarExtended/Core/LegacyDefaultsDomainMigration.swift"
 
   # Mobius 계정 전환 엔진 (Sources/MobiusCore)
   # 제외: KeychainClient(Security + `security` 서브프로세스),

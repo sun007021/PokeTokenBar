@@ -82,8 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // 근거와 각 단계의 함정은 `MobiusLaunchSequence` 주석에.
         MobiusLaunchSequence.run { step in
             switch step {
+            case .legacyDefaultsDomainCopy:
+                Self.runLegacyDefaultsDomainCopy()    // 구 번들 ID 도메인의 설정 보존
             case .legacyStorageRename:
-                Self.migrateLegacyStorageIfNeeded()   // TokenMac → PokeTokenBar 리네임: 기존 companion/캐시 보존
+                Self.runStateDirectoryMigration()     // 개명 체인: 기존 companion/캐시/계정 보존
             case .mobiusDataMigration:
                 Self.runMobiusDataMigration()
             case .accountStateCreation:
@@ -514,21 +516,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return img
     }
 
-    /// TokenMac→PokeTokenBar 리네임에 따른 1회 이전: 기존 Application Support 폴더를
-    /// 새 이름으로 옮겨 companion 진행상황·스프라이트 캐시·스냅샷을 보존한다(신규 폴더 없을 때만).
-    /// ★ `base`/`fileManager` 는 **테스트 주입 전용** 파라미터다 — 이 게이트
-    /// (`!fileExists(atPath: new.path)`)가 순서 계약의 함정 그 자체라,
-    /// `MobiusLaunchSequenceTests` 가 복제본이 아니라 **이 함수**를 임시 디렉터리에 대고 돌린다.
-    nonisolated static func migrateLegacyStorageIfNeeded(
-        base: URL? = nil, fileManager fm: FileManager = .default
-    ) {
-        let base = base ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let old = base.appendingPathComponent("TokenMac")
-        let new = base.appendingPathComponent("PokeTokenBar")
-        guard fm.fileExists(atPath: old.path), !fm.fileExists(atPath: new.path) else { return }
-        try? fm.moveItem(at: old, to: new)
-    }
-
     /// 계정 전환 ↔ 한도 캐시의 **유일한 접점.** 두 계층은 서로를 모르고, 둘 다 들고 있는 것은
     /// 이 델리게이트뿐이라 결합을 여기에 둔다(`store.onRefresh` 와 같은 자리·같은 관례).
     ///
@@ -553,6 +540,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// 독립 Mobius.app 데이터 1회 이전. **실패해도 앱 시작을 막지 않는다** — 계정 전환은 부가
     /// 기능인데 여기서 던지면 포켓몬 앱 전체가 못 뜬다. 실패 시 대상 디렉터리가 안 만들어지므로
     /// 다음 실행에서 자연히 재시도된다.
+    private nonisolated static func runLegacyDefaultsDomainCopy() {
+        let copied = LegacyDefaultsDomainMigration.migrateIfNeeded()
+        guard !copied.isEmpty else { return }
+        AppLog.write("defaults: copied \(copied.count) setting(s) from the pre-rename bundle domain")
+    }
+
+    private nonisolated static func runStateDirectoryMigration() {
+        guard let from = StateDirectoryMigration.migrateIfNeeded() else { return }
+        AppLog.write("storage: renamed the state directory \(from) → \(StateDirectoryMigration.currentName)")
+    }
+
     private nonisolated static func runMobiusDataMigration() {
         do {
             switch try MobiusDataMigration.migrateIfNeeded() {

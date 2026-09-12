@@ -560,7 +560,7 @@ struct L {
         ---
         앱 버전: v\(version)
         macOS: \(os)
-        로그 파일(첨부 권장): ~/Library/Logs/PokeTokenBar.log
+        로그 파일(첨부 권장): ~/Library/Logs/PokeTokenBarExtended.log
         """,
         """
         What happened:
@@ -570,7 +570,7 @@ struct L {
         ---
         App version: v\(version)
         macOS: \(os)
-        Log file (please attach): ~/Library/Logs/PokeTokenBar.log
+        Log file (please attach): ~/Library/Logs/PokeTokenBarExtended.log
         """,
         """
         問題の内容:
@@ -580,7 +580,7 @@ struct L {
         ---
         アプリのバージョン: v\(version)
         macOS: \(os)
-        ログファイル（添付推奨）: ~/Library/Logs/PokeTokenBar.log
+        ログファイル（添付推奨）: ~/Library/Logs/PokeTokenBarExtended.log
         """,
         """
         Descripción del problema:
@@ -590,7 +590,7 @@ struct L {
         ---
         Versión de la app: v\(version)
         macOS: \(os)
-        Archivo de registro (se recomienda adjuntar): ~/Library/Logs/PokeTokenBar.log
+        Archivo de registro (se recomienda adjuntar): ~/Library/Logs/PokeTokenBarExtended.log
         """,
         """
         Ce qui s'est passé :
@@ -600,7 +600,7 @@ struct L {
         ---
         Version de l'app : v\(version)
         macOS: \(os)
-        Fichier journal (à joindre de préférence) : ~/Library/Logs/PokeTokenBar.log
+        Fichier journal (à joindre de préférence) : ~/Library/Logs/PokeTokenBarExtended.log
         """,
         """
         Descrição do problema:
@@ -610,7 +610,7 @@ struct L {
         ---
         Versão do app: v\(version)
         macOS: \(os)
-        Arquivo de log (anexe, por favor): ~/Library/Logs/PokeTokenBar.log
+        Arquivo de log (anexe, por favor): ~/Library/Logs/PokeTokenBarExtended.log
         """,
         """
         Was ist passiert:
@@ -620,7 +620,7 @@ struct L {
         ---
         App-Version: v\(version)
         macOS: \(os)
-        Protokolldatei (bitte anhängen): ~/Library/Logs/PokeTokenBar.log
+        Protokolldatei (bitte anhängen): ~/Library/Logs/PokeTokenBarExtended.log
         """)
     }
 

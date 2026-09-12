@@ -5,7 +5,9 @@ import XCTest
 ///
 /// 순서 단언만 하는 테스트는 "왜 그 순서여야 하는지"를 증명하지 못하므로, 여기서는 각 순서를
 /// **실제 파일 연산으로 재생**하고 데이터가 실제로 넘어왔는지를 본다:
-///   - 레거시 이름변경은 프로덕션 함수 `AppDelegate.migrateLegacyStorageIfNeeded(base:)`
+///   - 설정 도메인 복사는 프로덕션 함수 `LegacyDefaultsDomainMigration.migrateIfNeeded(...)`
+///     (임시 suite 두 개에 대고 — 실제 UserDefaults 도메인은 건드리지 않는다)
+///   - 레거시 이름변경은 프로덕션 함수 `StateDirectoryMigration.migrateIfNeeded(base:)`
 ///   - Mobius 데이터 이전은 프로덕션 함수 `MobiusDataMigration.migrateIfNeeded(source:)`
 ///   - 상태 디렉터리 생성은 프로덕션 함수 `AppStatePaths.directory()` (호출만으로 디렉터리가 생긴다)
 /// 이 셋은 `PTB_STATE_DIR` 로 임시 디렉터리에 격리해 돌린다 — 실제
@@ -15,9 +17,16 @@ final class MobiusLaunchSequenceTests: XCTestCase {
     private var root: URL!
     private var appSupport: URL!
     private var mobiusSource: URL!
+    private var legacySuite: String!
+    private var currentSuite: String!
+    private var defaults: UserDefaults!
+    /// `.accountStateCreation` 이 그 시점에 읽은 "계정 전환 켜짐" 설정. 설정 복사가 늦으면 false.
+    private var autoSwitchSeenAtStateCreation: Bool?
 
     private var legacyDir: URL { appSupport.appendingPathComponent("TokenMac") }
-    private var stateDir: URL { appSupport.appendingPathComponent("PokeTokenBar") }
+    private var stateDir: URL {
+        appSupport.appendingPathComponent(StateDirectoryMigration.currentName)
+    }
     private var migratedPokedex: URL { stateDir.appendingPathComponent("companion-state.json") }
     private var migratedAccounts: URL { stateDir.appendingPathComponent("mobius/accounts.json") }
 
@@ -42,10 +51,20 @@ final class MobiusLaunchSequenceTests: XCTestCase {
 
         // AppStatePaths.directory() 가 여기에 상태 디렉터리를 만든다(= 프로덕션 기본 경로와 같은 모양).
         setenv("PTB_STATE_DIR", stateDir.path, 1)
+
+        let id = UUID().uuidString
+        legacySuite = "ptb.launchseq.legacy.\(id)"
+        currentSuite = "ptb.launchseq.current.\(id)"
+        defaults = UserDefaults(suiteName: currentSuite)!
+        UserDefaults(suiteName: legacySuite)!.set(true, forKey: MobiusFeature.enabledKey)
+        autoSwitchSeenAtStateCreation = nil
     }
 
     override func tearDownWithError() throws {
         unsetenv("PTB_STATE_DIR")
+        UserDefaults(suiteName: legacySuite)!.removePersistentDomain(forName: legacySuite)
+        defaults.removePersistentDomain(forName: currentSuite)
+        defaults = nil
         try? fm.removeItem(at: root)
         root = nil
         appSupport = nil
@@ -55,8 +74,11 @@ final class MobiusLaunchSequenceTests: XCTestCase {
     /// 한 단계를 프로덕션과 같은 연산으로 재생한다.
     private func perform(_ step: MobiusLaunchSequence.Step) {
         switch step {
+        case .legacyDefaultsDomainCopy:
+            LegacyDefaultsDomainMigration.migrateIfNeeded(
+                defaults: defaults, from: legacySuite, into: currentSuite)
         case .legacyStorageRename:
-            AppDelegate.migrateLegacyStorageIfNeeded(base: appSupport, fileManager: fm)
+            StateDirectoryMigration.migrateIfNeeded(base: appSupport, fileManager: fm)
         case .mobiusDataMigration:
             _ = try? MobiusDataMigration.migrateIfNeeded(source: mobiusSource, fileManager: fm)
         case .accountStateCreation:
@@ -67,6 +89,8 @@ final class MobiusLaunchSequenceTests: XCTestCase {
             let mobius = dir.appendingPathComponent("mobius")
             try? fm.createDirectory(at: mobius, withIntermediateDirectories: true)
             try? Data("{\"accounts\":[]}".utf8).write(to: mobius.appendingPathComponent("accounts.json"))
+            // 프로덕션은 여기서 `MobiusFeature.isEnabled`(= `mobius.enabled`)를 읽어 엔진을 켤지 정한다.
+            autoSwitchSeenAtStateCreation = defaults.bool(forKey: MobiusFeature.enabledKey)
         }
     }
 
@@ -96,10 +120,10 @@ final class MobiusLaunchSequenceTests: XCTestCase {
         runLaunch(MobiusLaunchSequence.order)
 
         XCTAssertEqual(try Data(contentsOf: migratedPokedex), Data("pokedex".utf8),
-                       "TokenMac 시절 도감이 PokeTokenBar 로 넘어와야 한다")
+                       "TokenMac 시절 도감이 현재 이름의 상태 디렉터리로 넘어와야 한다")
         XCTAssertFalse(fm.fileExists(atPath: legacyDir.path), "이름변경이면 원본은 남지 않는다")
         XCTAssertEqual(try Data(contentsOf: migratedAccounts), Data("{\"accounts\":[]}".utf8),
-                       "기존 Mobius.app 계정이 PokeTokenBar/mobius 로 넘어와야 한다")
+                       "기존 Mobius.app 계정이 <상태 디렉터리>/mobius 로 넘어와야 한다")
         XCTAssertEqual(
             try Data(contentsOf: stateDir.appendingPathComponent("mobius/secrets/a.json")),
             Data("secret-a".utf8), "비밀 스냅샷도 함께 넘어와야 한다")
@@ -119,14 +143,38 @@ final class MobiusLaunchSequenceTests: XCTestCase {
                        "도감이 새 위치로 오지 못한다 — 사용자에겐 '진행이 날아갔다'로 보인다")
         // 대조군: 이 순서에서도 Mobius 계정 이전 자체는 성공한다 — 유실은 레거시 도감 쪽뿐이다.
         XCTAssertTrue(fm.fileExists(atPath: migratedAccounts.path))
-        XCTAssertEqual(MobiusLaunchSequence.order.first, .legacyStorageRename,
-                       "그래서 계약은 레거시 이름변경을 맨 앞에 둔다")
+        XCTAssertLessThan(
+            MobiusLaunchSequence.order.firstIndex(of: .legacyStorageRename)!,
+            MobiusLaunchSequence.order.firstIndex(of: .mobiusDataMigration)!,
+            "그래서 계약은 레거시 이름변경을 상태 디렉터리를 건드리는 모든 단계보다 앞에 둔다")
     }
 
     // MARK: 함정 2 — AccountsState 를 먼저 만들면 기존 Mobius 계정이 영영 안 넘어온다
 
     /// `AccountsState`(AccountStore) 가 먼저 `mobius/` 를 만들면 `alreadyMigrated` 판정
     /// (=대상 디렉터리 존재)이 걸려 이전이 조용히 건너뛰어진다.
+    /// 설정 복사가 제때 돌면, 그 뒤 단계가 사용자의 "계정 전환 켬"을 그대로 본다.
+    func testDeclaredOrderCarriesTheUsersSettingsIntoStateCreation() throws {
+        runLaunch(MobiusLaunchSequence.order)
+
+        XCTAssertEqual(autoSwitchSeenAtStateCreation, true,
+                       "구 번들 도메인의 '계정 전환 켬' 이 상태 생성 시점에 보여야 한다")
+        XCTAssertTrue(defaults.bool(forKey: MobiusFeature.enabledKey))
+    }
+
+    /// 반대 순서면 그 실행에서는 설정이 통째로 초기값이다 — 켜 둔 자동 전환이 안 돈다.
+    func testCopyingDefaultsAfterStateCreationLosesTheSettingForThatLaunch() throws {
+        runLaunch([.legacyStorageRename, .mobiusDataMigration,
+                   .accountStateCreation, .legacyDefaultsDomainCopy])
+
+        XCTAssertEqual(autoSwitchSeenAtStateCreation, false,
+                       "자동 전환을 켜 둔 사용자에게 그 실행 내내 전환이 안 도는 것으로 나타난다")
+        XCTAssertLessThan(
+            MobiusLaunchSequence.order.firstIndex(of: .legacyDefaultsDomainCopy)!,
+            MobiusLaunchSequence.order.firstIndex(of: .accountStateCreation)!,
+            "그래서 계약은 설정 복사를 설정을 읽는 모든 단계보다 앞에 둔다")
+    }
+
     func testCreatingAccountStateBeforeMigrationStrandsMobiusAccounts() throws {
         runLaunch([.legacyStorageRename, .accountStateCreation, .mobiusDataMigration])
 

@@ -14,7 +14,7 @@ actor SpriteStore {
 
     init(directory: URL? = nil) {
         let d = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("PokeTokenBar/sprites")
+            .appendingPathComponent("\(StateDirectoryMigration.currentName)/sprites")
         self.directory = d
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
     }
@@ -95,7 +95,7 @@ actor SpriteStore {
 enum SpriteLoader {
     static let cacheDir: URL = {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("PokeTokenBar/sprites")
+            .appendingPathComponent("\(StateDirectoryMigration.currentName)/sprites")
     }()
 
     /// 동기 시드와 async 로드가 NSImage 를 공유해 파일 읽기와 이미지 객체 생성을 반복하지 않는다.
