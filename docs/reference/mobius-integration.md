@@ -102,6 +102,17 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
   만들고 500ms 고정 대기 후 스크롤 결과를 측정하므로 머신 부하에 따라 실패할 수 있다. Mobius 코드를
   0줄 더한 기준선 커밋에서도 동일하게 재현되므로 이 통합의 회귀가 아니다 — **전체 스위트 판정 시
   이 테스트 1건만 실패하는 것은 통과로 간주한다.**
+- ★ **스위트 시간이 수십 분으로 튀면 코드가 아니라 맥이 잔 것이다 — `caffeinate -i swift test` 로
+  돌려라.** 방치한 채 배터리로 돌리면 macOS 가 유휴 판정으로 sleep 에 들어가고, 그때 시간 대기
+  중이던 테스트가 그 시간만큼 통째로 늘어난다(그리고 **깨어나서 통과한다** — 행이 아니다).
+  실측 2026-09-12: 같은 커밋이 40.1s·39.2s 로 돌다가 한 번 **1,186s** 가 나왔고,
+  `SwitcherTests.testResaveOnSwitchClearsReauthOfOutgoingAccount` 한 건이 **992.4s** 를 먹었다.
+  `pmset -g log` 에 `10:37:54 Entering Sleep … 'Maintenance Sleep' … **994 secs**` 가 그대로
+  찍혀 있다(두 번째 sleep 146s 는 `UsageStoreTests` 163s 로 나타났다). 느린 스위트가 **매번
+  다른 곳으로 옮겨 다니는 것**이 신호다 — 그때 timed wait 을 쥐고 있던 테스트가 걸릴 뿐이라,
+  `sample` 로 잡히는 스택(CFNetwork 등)은 원인이 아니라 그 순간 주차돼 있던 자리다. 이 함정은
+  `MobiusCore` 테스트처럼 네트워크·Keychain 을 아예 안 쓰는(`InMemoryKeychain` + 임시 디렉터리)
+  스위트에서도 똑같이 나타나므로, **"우리 코드가 뭔가 붙잡고 있다"로 오귀인하기 쉽다.**
 
 ## 단계
 
