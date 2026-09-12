@@ -15,6 +15,19 @@ read_when: mobius 통합 관련 코드를 만질 때, 상류(chattymin/PokeToken
 | 산출물 | 개인 포크 (상류 PR 아님) | 상류는 "읽기 전용 관찰자" 성격이라 자격증명 변경 기능은 별도 합의가 필요 |
 | 1차 범위 | 핵심 전환만 | 계정 목록·수동/자동 전환·게이지·로그인. Desktop 동시 전환/멀티 Mac 동기화 UI 제외 |
 | 데이터 경로 | `~/Library/Application Support/PokeTokenBar/mobius/` | 두 앱 병행 시 파일 경합 방지. 기존 Mobius 데이터는 1회 복사 마이그레이션 |
+| 다국어 | **ko·en 만 번역**, 나머지 5개 슬롯은 en 값 | 개인 포크라 상류 기여 계획이 없다(사용자 결정 2026-09-12) |
+
+### 다국어 규칙 (계정 전환 기능 한정)
+
+`L.t(...)` 는 7개 인자가 필수라 슬롯을 비울 수 없다. 이 기능의 새 문자열은 **ko·en 만 제대로 쓰고
+ja/es/fr/pt/de 슬롯에는 en 값을 그대로 넣는다.** 그 언어 사용자에게는 계정 탭만 영어로 보이고 나머지
+앱은 모국어를 유지한다.
+
+- **기존 PokeTokenBar 문자열은 건드리지 않는다** — 이 규칙은 계정 전환 기능에만 적용된다.
+- Phase 4~5 에서 **이미 7개 언어로 번역된 항목은 그대로 둔다.** 되돌리는 건 순수한 손실이고, 각
+  슬롯은 독립적으로 읽히므로 혼재는 무해하다.
+- **7개 언어 레이아웃 테스트는 유지한다.** en 이 들어간 슬롯은 en 폭으로 측정될 뿐이고, 나중에 진짜
+  번역이 들어올 때 폭 회귀를 잡아 준다. 테스트를 ko/en 만 도는 것으로 축소하지 마라.
 
 ## 왜 이식이 싼가
 
@@ -108,7 +121,7 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
       틱을 멈추면 소진돼도 전환이 안 되고 사용자는 막힌 CLI 로 돌아온다. 쓴다면 **시스템** 슬립
       (`NSWorkspace.willSleepNotification`/`didWakeNotification`)이어야 하고, 깨어날 때 즉시 1틱을
       돌리는 경로가 함께 필요하다)
-- [ ] **Phase 7 — 다국어**: 약 115개 문자열 × 7개 언어. `L` 구조체 방식(lproj·`Bundle.module` 금지).
+- [ ] **Phase 7 — 다국어**: `MobiusStrings.loc()` 경유 60개를 `L` 로 이관(lproj·`Bundle.module` 금지).
       이관 대상은 `Sources/PokeTokenBar/Mobius/MobiusStrings.swift` 의 `loc(_:)`/`loc(_:_:)` —
       Phase 3 이 만든 임시 경유지로, 지금은 키(한국어 원문)를 그대로 돌려준다
 - [ ] **Phase 8 — 게이트·빌드**: `test-gate.sh` 화이트리스트 갱신, 고정 서명 인증서, `/Applications` 설치
