@@ -197,6 +197,9 @@ brew uninstall --cask poke-token-bar
 도감·토큰·계정 데이터가 함께 날아간다. 위 명령은 `/Applications/PokeTokenBar.app` 만 지우고
 데이터는 그대로 둔다. 이후 업데이트는 아래 빌드 명령으로 직접 한다.
 
+cask 제거는 이제 **유일한 방어가 아니다** — 앱 안의 cask 업그레이드 경로도 코드에서 닫혀 있다
+(§상류 릴리스 알림이 떴을 때). cask 를 다시 설치해도 덮어쓰기가 되살아나지 않는다.
+
 ### 기존 `Mobius.app` 은 제거한다 (사용자 결정)
 
 두 앱을 동시에 두면 Keychain·`~/.claude.json` 이라는 전역 자원을 양쪽이 스왑해 자격증명이
@@ -248,6 +251,10 @@ git rebase upstream/main          # mobius-integration 브랜치에서
 격리 경계가 무너진 것이니 경계를 되돌리는 쪽으로 해결한다. `README*.md` 는 상류 파일이라
 **건드리지 않는다** — 이 포크의 문서는 이 파일이다. rebase 후에는 `./scripts/test-gate.sh`.
 
+rebase 로 기준점이 올라갔으면 `scripts/build-app.sh` 의 `UPSTREAM_VERSION` 을 새 상류 버전으로
+올리고 `FORK_BUILD` 를 `1` 로 되돌린다 (§버전 표기). 빠뜨리면 표시 버전이 옛 상류 기준점에
+머물러 상류 릴리스 알림이 이미 반영한 버전에도 계속 뜬다.
+
 ### 버전 표기 — `2.5.3+mobius.1`
 
 포크 빌드와 상류 빌드가 **같은 번들 ID·같은 설치 경로**를 쓰기 때문에, 화면에 뜨는 버전이 둘을
@@ -295,8 +302,9 @@ git rebase upstream/main          # mobius-integration 브랜치에서
 - 상류 `2.5.4` → **새 버전 → 배너 뜸** (상류 변경을 계속 알림으로 받겠다는 사용자 결정)
 - `FORK_BUILD` 를 올려도 판정은 `+` 앞만 본다
 
-`UpdateCheckerTests` 의 `testFork*` 넷이 양방향으로 잠근다(고치기 전 구현에 되돌려 실제로
-빨간불이 되는지 확인하고 넣었다 — "비교를 죽여서" 통과하는 구현도 걸리게 반대 방향을 함께 둔다).
+`UpdateCheckerTests` 의 `testFork*`·`testPreRelease*` 가 양방향으로 잠근다 — 고치기 전 구현에
+되돌려 실제로 빨간불이 되는지 확인하고 넣었다. "비교를 아예 죽여서" 통과하는 구현도 걸리게
+**상류 2.5.4 가 여전히 새 버전으로 잡히는지**를 같은 묶음에서 단언한다.
 
 ### 상류 릴리스 알림이 떴을 때 (덮어쓰기 금지)
 
