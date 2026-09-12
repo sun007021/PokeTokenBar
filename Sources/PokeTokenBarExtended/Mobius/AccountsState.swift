@@ -421,16 +421,16 @@ final class AccountsState: ObservableObject {
         loadNotifiedSuspectsIfNeeded()
     }
 
-    /// `isolated`(SE-0371) — 메인 액터에서 돈다. Timer.invalidate는 스케줄한 런루프에서
-    /// 불러야 하고, 두 프로퍼티 모두 메인 액터 격리라 nonisolated deinit에서는 Swift 6가
-    /// 접근 자체를 막는다. 정상 경로는 `stop()`이고 이건 그걸 안 부른 경우의 안전망이다.
-    isolated deinit {
-        timer?.invalidate()
-        if let observer {
-            DistributedNotificationCenter.default().removeObserver(observer)
-        }
-        stopExternalAppWatch()
-    }
+    // 의도적으로 deinit이 없다 — 예전엔 `isolated deinit`(SE-0371)로 같은 정리를 하는 안전망을
+    // 뒀지만, `isolated deinit`이 클래스에 지원되는 건 Swift 6.2+뿐이라 CI의 Xcode 16.4/Swift
+    // 6.1.2에서는 컴파일이 안 됐다(로컬 6.3.3에서만 통과 — `docs/reference/defect-log.md` §빌드·
+    // 도구체인). 지우기 전에 도달 가능성부터 확인했다: 이 타입의 유일한 인스턴스는
+    // `AppDelegate.accounts`이고 앱 수명 내내 재대입·nil화 없이 살아 프로세스 종료(exit)로만
+    // 없어지므로 프로덕션에서 deinit은 사실상 안 불린다. 테스트(`MobiusTestSupport.
+    // isolatedAccountsState`)는 매번 teardown에서 `stop()`을 먼저 부른 뒤에야 지역변수가 스코프를
+    // 벗어나므로, 벗어나는 시점엔 timer·observer가 이미 nil이라 예전 deinit 본문은 그 경로에서도
+    // no-op이었다. 즉 이 안전망은 어느 경로에서도 실제 일을 한 적이 없다 — 이식성과 맞바꿀 가치가
+    // 없어 그냥 없앴다. 정상 종료 경로는 `stop()` 하나뿐이니 새 호출부를 추가할 때 반드시 그걸 부를 것.
 
     // MARK: 수명주기
 

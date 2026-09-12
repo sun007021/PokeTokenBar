@@ -358,6 +358,18 @@ read_when:
   안에 보관한다. 객체 동일성 검증과 동시 요청은 유지하며, Sendable 우회 선언을 추가하지 않는다.
   회귀 가드: `SpriteImageCacheTests` 의 두 동시 로드 테스트와 `macos-15` CI의 테스트 컴파일.
   (CI 실패: 2026-09-10.)
+- **`isolated deinit`(SE-0371, 클래스 대상)은 Swift 6.2+ 전용이다.** `AccountsState`(구 Mobius
+  `AppState`)의 안전망 deinit이 로컬 Swift 6.3.3에서는 통과했지만 CI의 Xcode 16.4/Swift 6.1.2에서는
+  `call to main actor-isolated instance method 'stopExternalAppWatch()' in a synchronous nonisolated
+  context`로 실패했다 — `isolated` 키워드 자체가 인식 안 돼 본문이 여전히 nonisolated로 검사된 것.
+  **왜 못 걸렀나:** 위 Sendable 항목과 같은 부류 — 로컬 최신 도구체인은 문법 가용성까지는 검증 못 한다.
+  **도달 가능성부터 확인했다:** 이 deinit은 프로덕션(유일한 인스턴스가 `AppDelegate.accounts`,
+  앱 수명 내내 재대입 없음 — 프로세스 종료로만 없어져 deinit 미도달)·테스트(`MobiusTestSupport.
+  isolatedAccountsState`가 스코프 이탈 전에 항상 `stop()`을 먼저 불러 timer·observer가 이미 nil)
+  양쪽 경로 모두에서 본문이 실행될 때 이미 no-op이었다 — 즉 안전망이 실제로 일을 한 적이 없어
+  이식성과 맞바꿀 이유가 없었다. → deinit 자체를 지우고 `stop()`을 유일한 정상 종료 경로로 남겼다.
+  회귀 가드: `ToolchainPortabilityTests.testSourcesDoNotUseIsolatedDeinit` — `Sources/` 전체에서
+  `isolated deinit` 재등장을 소스 스캔으로 막는다(주입해서 빨간불 확인함). (CI 실패: 2026-09-12.)
 - **SwiftUI `View`/`App` 경계는 `@MainActor` 를 명시한다.** Swift 6.3 은 `body` 밖의 `@ViewBuilder` helper·
   동기 클로저를 nonisolated 로 검사해, `@MainActor` `@Observable` store 접근이 수십 개의 오류로 연쇄된다.
   개별 프로퍼티에 `MainActor.assumeIsolated` 를 흩뿌리지 말고 UI 타입 선언 한 곳에 격리를 둔다.
