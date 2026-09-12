@@ -217,8 +217,30 @@ final class AccountsState: ObservableObject {
     private var externalAppWatchTimer: Timer?
     static let externalAppWatchInterval: TimeInterval = 60
 
+    /// `Timer.tolerance` 배수 — wakeup 코얼레싱(다른 wakeup 과 합쳐 깨우기 = 배터리 절약).
+    ///
+    /// 이 앱은 **자기가 만드는 모든 타이머에 tolerance 를 준다**(`UsageStore.reschedule` 0.1,
+    /// `AppDelegate.menuFrameTolerance` 0.1). 이식된 두 타이머만 빠져 있었다.
+    ///
+    /// ★ tolerance 는 **늦게만** 발화시키므로(Apple: "fire the timer later than the scheduled
+    /// time, up to the tolerance") 배수는 곧 **최악 지연**이다. 메뉴바에서 그 대가는 재생
+    /// 속도였지만(0.5 를 쓰다 애니메이션이 늘어져 0.1 로 내린 기록 — defect-log '에너지'),
+    /// 여기서 그 대가는 **전환이 늦어지는 시간**이다:
+    ///  - 3초 틱 → 최악 +0.3초. 전환 경로는 그 뒤에 usage API 왕복과 분 단위 검증 쿨다운
+    ///    (`HitAttribution.cooldown` 180초)을 더 태우므로 0.3초는 그 안에 묻힌다. 이 배수를
+    ///    키우면 "빠른 폴백"이라는 3초 틱의 존재 이유를 갉아먹으므로 키우지 않는다.
+    ///  - 60초 안전망 → 최악 +6초. 알림을 놓쳤을 때의 백스톱이라 분 단위가 원래 계약이다.
+    ///
+    /// 코얼레싱 상대는 충분하다 — 3초 틱 자체가 3초마다 깨므로 60초 타이머의 6초 창 안에는
+    /// **반드시** 합칠 wakeup 이 있고, 메뉴바 프레임 타이머가 기본 0.4초마다 깨므로 틱의
+    /// 0.3초 창도 대부분 합쳐진다.
+    static let timerTolerance = 0.1
+
     private var lastReconcileAt = Date.distantPast
     private var lastActiveSnapshotSyncAt = Date.distantPast
+    /// 엔진 틱 주기 — "빠른 폴백"이 목적이라 짧다. 안의 무거운 작업들은 각자 자기 간격으로
+    /// 게이팅되므로(아래 reconcile/스냅샷 싱크) 이 값은 **반응 지연의 상한**에 가깝다.
+    static let tickInterval: TimeInterval = 3
     static let reconcileInterval: TimeInterval = 15
     static let activeSnapshotSyncInterval: TimeInterval = 5 * 60 // 활성 계정 토큰 스냅샷 동기화
     // 만료 임박 폴백 자동 refresh: 1시간마다 스윕, 만료 3일 전부터, 계정당 최소 6시간 간격.
@@ -418,6 +440,7 @@ final class AccountsState: ObservableObject {
         let timer = Timer(timeInterval: Self.externalAppWatchInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.reevaluateExternalApp() }
         }
+        timer.tolerance = Self.externalAppWatchInterval * Self.timerTolerance
         RunLoop.main.add(timer, forMode: .common)
         externalAppWatchTimer = timer
     }
@@ -465,9 +488,13 @@ final class AccountsState: ObservableObject {
 
         // 3초 주기: 로그 스캔 → 자동 전환 판단 (빠른 fallback). reconcile/adopt는 내부에서
         // 15초로 게이팅해 Keychain 접근·라이브 추종 바운스를 늘리지 않는다.
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+        // tolerance 는 하우스 규율(모든 타이머가 코얼레싱한다) — 배수 근거는 `timerTolerance`.
+        let tick = Timer(timeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.scheduleTick() }
         }
+        tick.tolerance = Self.tickInterval * Self.timerTolerance
+        RunLoop.main.add(tick, forMode: .common)
+        timer = tick
         scheduleTick()
     }
 
