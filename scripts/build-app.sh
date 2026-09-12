@@ -3,7 +3,29 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="2.5.3"
+# ── 버전 (이 저장소의 유일한 정의 지점) ──────────────────────────────────────
+# 이 포크는 상류(chattymin/PokeTokenBar) 위에 mobius 계정 전환을 얹은 것이라, 표시 버전이
+# 상류 기준점과 포크 빌드 번호를 함께 담는다. 상류를 rebase 해 기준점이 올라가면
+# UPSTREAM_VERSION 을 그 버전으로 올리고 FORK_BUILD 를 1 로 되돌린다.
+#
+# CFBundleShortVersionString — 표시(설정창 푸터)·업데이트 비교용. semver 빌드 메타데이터
+#   (`+mobius.N`)를 쓴다: 배너가 "🆕 v2.5.4 available (you have 2.5.3+mobius.1)" 로 나와
+#   지금 돌고 있는 게 포크라는 사실이 결정 시점에 그대로 보인다. `UpdateChecker.isNewer` 는
+#   `+` 앞의 숫자 세그먼트만 비교하므로 상류 2.5.4 는 여전히 새 버전으로 잡힌다(회귀 테스트
+#   `UpdateCheckerTests.testFork*` 가 고정). Apple 규격은 "마침표로 구분된 정수"를 기대하지만
+#   실측(2026-09-12) plutil·codesign --verify --strict·`defaults read`·`PlistBuddy`·
+#   `Bundle.main.object(forInfoDictionaryKey:)` 전부 이 문자열을 그대로 통과시킨다. 규격을
+#   집행하는 곳은 App Store 심사이고 이 포크는 거기로 안 간다.
+#   곁가지: `CodexRateLimitsProvider` 가 이 값을 Codex MCP 핸드셰이크의 `clientInfo.version`
+#   으로 보낸다 — `2.5.3+mobius.1` 은 **유효한 semver**(빌드 메타데이터)이고, 대안이던
+#   `2.5.3.1` 은 semver 가 아니다. 상대가 검증한다면 `+` 쪽이 오히려 안전한 표기다.
+# CFBundleVersion — LaunchServices 가 같은 번들 ID 의 중복 사본 중 무엇을 띄울지 고를 때
+#   비교하는 키다. 여기는 숫자만 유지하고, 네 번째 세그먼트를 포크 빌드 번호로 둬 상류
+#   2.5.3 보다 항상 위에 놓이게 한다.
+UPSTREAM_VERSION="2.5.3"
+FORK_BUILD="1"
+VERSION="$UPSTREAM_VERSION+mobius.$FORK_BUILD"
+BUNDLE_VERSION="$UPSTREAM_VERSION.$FORK_BUILD"
 APP_NAME="PokeTokenBar"
 BUILD_DIR="build"
 APP="$BUILD_DIR/$APP_NAME.app"
@@ -29,7 +51,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>$APP_NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$BUNDLE_VERSION</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSUIElement</key><true/>

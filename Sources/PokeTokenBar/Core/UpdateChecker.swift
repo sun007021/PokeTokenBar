@@ -76,14 +76,31 @@ final class UpdateChecker {
 
     /// a 가 b 보다 높은 semver 인가. ("2.0.10" > "2.0.9" 등 숫자 비교)
     nonisolated static func isNewer(_ a: String, than b: String) -> Bool {
-        let pa = a.split(separator: ".").map { Int($0) ?? 0 }
-        let pb = b.split(separator: ".").map { Int($0) ?? 0 }
+        let pa = precedenceParts(a)
+        let pb = precedenceParts(b)
         for i in 0..<max(pa.count, pb.count) {
             let x = i < pa.count ? pa[i] : 0
             let y = i < pb.count ? pb[i] : 0
             if x != y { return x > y }
         }
         return false
+    }
+
+    /// 버전에서 **우선순위 비교에 쓰이는 숫자 세그먼트만** 뽑는다 — semver 가 우선순위에서
+    /// 제외하는 빌드 메타데이터(`+…`)와 프리릴리스(`-…`)를 먼저 잘라낸다.
+    ///
+    /// 이 포크(mobius 계정 전환 통합)가 `2.5.3+mobius.1` 을 표시 버전으로 쓰기 때문에 필요하다.
+    /// 그냥 `.` 으로 쪼개면 `"3+mobius"` 가 `Int()` 실패로 0 이 되어 `[2, 5, 0, 1]` 이 되고,
+    /// **이미 나와 있는 상류 2.5.3 이 자기보다 최신으로 보여** 업데이트 배너가 상시로 뜬다.
+    /// 잘라낸 뒤에는 `[2, 5, 3]` 이라 상류 2.5.3 은 동일(배너 없음), 2.5.4 는 새 버전이다 —
+    /// 상류 변경을 계속 알림으로 받겠다는 결정이 이 한 단계에 걸려 있다.
+    ///
+    /// 프리릴리스를 함께 버리는 것은 이 자리에선 안전한 방향이다: 같은 숫자의 `-rc1` 은
+    /// "새 버전 아님"이 되고(semver 도 `2.5.3-rc1 < 2.5.3`), GitHub `releases/latest` 는
+    /// 애초에 프리릴리스를 제외한다.
+    private nonisolated static func precedenceParts(_ version: String) -> [Int] {
+        version.prefix { $0 != "+" && $0 != "-" }
+            .split(separator: ".").map { Int($0) ?? 0 }
     }
 
     // MARK: brew 적용 (nonisolated — 블로킹 Process 는 detached 에서)

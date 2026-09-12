@@ -82,6 +82,19 @@ if [[ "${1:-}" == "--check-only" ]]; then
   exit 0
 fi
 
+# ── 포크 가드 ───────────────────────────────────────────────────────────────
+# 이 스크립트는 **상류 저장소**로 배포한다(REPO/TAP_REPO = chattymin/*). mobius 포크는 거기에
+# 릴리스를 올릴 수 없고, 아래 3/8 범프가 build-app.sh 의 `VERSION="..."` 를 평평한 리터럴로
+# 덮어써 포크 표기(UPSTREAM_VERSION + FORK_BUILD)를 조용히 지운다. 가드가 없으면 87행의
+# PREV grep 이 `+` 때문에 매치에 실패해 set -e 로 아무 설명 없이 죽는다 — 원인을 말하게 한다.
+# 포크 빌드 절차는 docs/reference/mobius-integration.md §빌드·설치.
+if grep -q '^FORK_BUILD=' scripts/build-app.sh; then
+  echo "✗ 이 체크아웃은 mobius 포크입니다 — release.sh 는 상류 배포 전용이라 실행하지 않습니다." >&2
+  echo "  포크 빌드: CODESIGN_IDENTITY=... PTB_REQUIRE_STABLE_SIGN=1 ./scripts/build-app.sh" >&2
+  echo "  (자세히: docs/reference/mobius-integration.md §빌드·설치 / §버전 표기)" >&2
+  exit 1
+fi
+
 VERSION="${1:?사용: release.sh <version>  (예: 2.1.1)}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "✗ 버전 형식 오류: $VERSION"; exit 1; }
 PREV=$(grep -oE 'VERSION="[0-9.]+"' scripts/build-app.sh | grep -oE '[0-9.]+')

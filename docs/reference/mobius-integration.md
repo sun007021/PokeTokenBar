@@ -248,25 +248,112 @@ git rebase upstream/main          # mobius-integration 브랜치에서
 격리 경계가 무너진 것이니 경계를 되돌리는 쪽으로 해결한다. `README*.md` 는 상류 파일이라
 **건드리지 않는다** — 이 포크의 문서는 이 파일이다. rebase 후에는 `./scripts/test-gate.sh`.
 
-### 버전 표기 (미적용 — 제안)
+### 버전 표기 — `2.5.3+mobius.1`
 
-`build-app.sh` 의 `VERSION` 이 상류와 같은 `2.5.3` 이라 포크인지 구분되지 않는다. 다만 **접미사를
-붙이는 흔한 방식은 이 코드베이스에서 위험하다**: `UpdateChecker.isNewer` 는 버전을 `.` 으로 쪼개
-`Int($0) ?? 0` 로 읽으므로, `2.5.3+mobius.1` 은 `[2, 5, 0, 1]` 로 해석된다(`"3+mobius"` → 0).
-그러면 **이미 나와 있는 상류 2.5.3 이 자기보다 최신으로 보여** 업데이트 배너가 상시로 뜨고,
-cask 가 설치돼 있으면 `applyUpdate()` 가 `brew upgrade --cask poke-token-bar` 를 실행해
-**포크가 상류 빌드로 덮어써진다.** `-mobius.1` 도 같은 이유로 같은 결과다.
+포크 빌드와 상류 빌드가 **같은 번들 ID·같은 설치 경로**를 쓰기 때문에, 화면에 뜨는 버전이 둘을
+구분하는 유일한 신호다. 표기 규칙은 `scripts/build-app.sh` 머리의 **두 변수 하나뿐**이다.
 
-- 라벨만 바꿀 거라면 숫자 세그먼트만 써라 — `2.5.3.1`(네 번째 = 포크 빌드 번호). 비교기가
-  `[2,5,3,1]` 로 읽어 상류 2.5.3 보다 위에 놓인다.
-- **하지만 라벨로는 근본 문제가 안 풀린다.** 상류가 2.5.4 를 내는 순간 어떤 표기를 쓰든 다시
-  "업데이트 있음"이 되고, cask 가 남아 있으면 덮어쓰기가 돌아온다. 근본 대응은 둘 중 하나다:
-  (a) 위 §Homebrew cask 제거를 지키면 `brewCaskPath()` 가 nil 을 반환해 덮어쓰기 경로가 죽고
-  릴리스 페이지를 여는 것으로 끝난다(배너는 계속 뜬다), (b) `UpdateChecker.repo` 를 포크
-  저장소로 바꾸면 릴리스가 없어 `releases/latest` 가 404 → `check()` 가 조기 반환 → 배너 자체가
-  사라진다. 한 줄이고 rebase 충돌도 그 한 줄에 그친다.
-- 곁가지: 이 문자열은 `CodexRateLimitsProvider` 가 Codex MCP 핸드셰이크의 `clientInfo.version`
-  으로도 보낸다. 비-semver 문자열을 상대가 거부할 여지가 있으니 여기서도 숫자 표기가 안전하다.
+| 키 | 값 | 왜 그 모양인가 |
+|---|---|---|
+| `CFBundleShortVersionString` | `$UPSTREAM_VERSION+mobius.$FORK_BUILD` = `2.5.3+mobius.1` | 표시·업데이트 비교용. 설정창 푸터와 업데이트 배너("🆕 v2.5.4 available (you have **2.5.3+mobius.1**)")에 그대로 나와 **결정 시점에** 포크임이 보인다 |
+| `CFBundleVersion` | `$UPSTREAM_VERSION.$FORK_BUILD` = `2.5.3.1` | LaunchServices 가 같은 번들 ID 의 중복 사본 중 무엇을 띄울지 고를 때 비교하는 키 — 여기는 숫자만 두고, 네 번째 세그먼트(포크 빌드 번호)가 상류 2.5.3 보다 위에 놓이게 한다 |
+
+**상류를 rebase 해 기준점이 올라가면** `UPSTREAM_VERSION` 을 그 버전으로 올리고 `FORK_BUILD` 를
+`1` 로 되돌린다. 포크 쪽만 다시 빌드하면 `FORK_BUILD` 만 올린다.
+
+#### Apple 규격 — 실측 (2026-09-12, 추측 아님)
+
+`CFBundleShortVersionString` 은 문서상 "마침표로 구분된 정수"를 기대하므로 `+` 가 어디서
+깨지는지 **실제로 번들을 만들어** 확인했다. 깨지는 곳이 없었다:
+
+| 검사 | 결과 |
+|---|---|
+| `plutil -lint Info.plist` | OK |
+| `codesign -s "Developer ID Application: …"` | 서명 성공 |
+| `codesign --verify --strict` | `valid on disk` + `satisfies its Designated Requirement` (Apple Root CA 체인 + secure timestamp) |
+| `defaults read …/Info.plist` · `PlistBuddy -c Print` | `2.5.3+mobius.1` 그대로 |
+| `Bundle.main.object(forInfoDictionaryKey:)` / `infoDictionary` | `2.5.3+mobius.1` 그대로 — 같은 두 키·같은 Developer ID 서명을 가진 별도 번들을 만들어 그 안에서 실행해 확인했다(메뉴바 앱은 띄우면 라이브 계정 데이터를 건드리므로 격리 번들로 봤다) |
+
+규격을 **집행하는** 곳은 App Store 심사이고 이 포크는 거기로 가지 않는다. 로컬 Gatekeeper 는
+버전 문자열을 보지 않는다(§빌드·설치의 quarantine 설명 참조).
+
+★ **`2.5.3.1`(네 자리 숫자)보다 `2.5.3+mobius.1` 이 나은 두 번째 이유**: 이 문자열은
+`CodexRateLimitsProvider` 가 Codex MCP 핸드셰이크의 `clientInfo.version` 으로도 보낸다.
+`2.5.3+mobius.1` 은 **유효한 semver**(빌드 메타데이터)이고 `2.5.3.1` 은 semver 가 아니다 —
+상대가 검증한다면 `+` 쪽이 오히려 안전하다(이 문서의 옛 판 추정과 반대다. 실제 핸드셰이크로
+확인하지는 않았다 — `codex app-server` 를 띄우면 실행 중 세션이 토큰을 회전시킬 수 있어
+건드리지 않았다).
+
+#### `UpdateChecker.isNewer` 를 함께 고쳤다
+
+구 비교기는 버전을 `.` 으로 쪼개 `Int($0) ?? 0` 으로 읽었다. `2.5.3+mobius.1` 은 `"3+mobius"` 가
+0 이 되어 `[2, 5, 0, 1]` 로 읽히고, **이미 나와 있는 상류 2.5.3 이 자기보다 최신으로 보여**
+업데이트 배너가 상시로 떴다. 지금은 `precedenceParts` 가 `+`(빌드 메타데이터)·`-`(프리릴리스)
+뒤를 잘라내고 숫자 세그먼트만 비교한다 — semver 가 우선순위에서 그 둘을 제외하는 것과 같다.
+
+- 상류 `2.5.3` → 동일 → 배너 없음
+- 상류 `2.5.4` → **새 버전 → 배너 뜸** (상류 변경을 계속 알림으로 받겠다는 사용자 결정)
+- `FORK_BUILD` 를 올려도 판정은 `+` 앞만 본다
+
+`UpdateCheckerTests` 의 `testFork*` 넷이 양방향으로 잠근다(고치기 전 구현에 되돌려 실제로
+빨간불이 되는지 확인하고 넣었다 — "비교를 죽여서" 통과하는 구현도 걸리게 반대 방향을 함께 둔다).
+
+### 상류 릴리스 알림이 떴을 때 (덮어쓰기 금지)
+
+배너의 **업데이트 버튼을 눌러 릴리스 페이지에서 받으면 안 된다.** 상류 zip 은 같은 경로의
+같은 번들 ID 를 교체하므로 계정 전환 기능이 통째로 사라진다(계정 *데이터* 는 남는다 — 번들
+ID·데이터 디렉터리를 안 바꿨기 때문. §데이터 보존 불변식). 올바른 갱신은 rebase 다:
+
+```bash
+git fetch upstream
+git rebase upstream/main          # mobius-integration 브랜치에서
+./scripts/test-gate.sh
+# build-app.sh: UPSTREAM_VERSION 을 새 상류 버전으로, FORK_BUILD 를 1 로
+CODESIGN_IDENTITY="Developer ID Application: Sunwook Lee (TYN557Y96W)" \
+  PTB_REQUIRE_STABLE_SIGN=1 ./scripts/build-app.sh
+```
+
+**자동 덮어쓰기 경로는 코드에서 닫았다** — `UpdateChecker.allowsBrewCaskUpgrade = false`.
+`applyUpdate()` 의 brew 분기는 확인창 **하나 없이** 앱을 종료하고 `brew upgrade --cask
+poke-token-bar` 로 번들을 교체한다. 지금은 사용자가 cask 를 지워 `brewCaskPath()` 가 nil 이지만
+한 번이라도 재설치되면 그 경로가 되살아나므로, 우연한 상태가 아니라 코드가 막게 했다
+(`testForkNeverTakesTheBrewCaskUpgradePath`). 남는 경로는 릴리스 페이지를 여는 것뿐이고,
+거기서부터는 사람이 zip 을 받아 직접 교체해야 하는 의식적인 행동이다.
+
+★ **배너에 경고 문구를 더하지 않기로 했다**(판단 근거): 배너는 이미 `you have
+2.5.3+mobius.1` 로 포크임을 그 자리에서 말하고 있어 정보는 중복이다. 반면 배너는 폭이 좁은
+`HStack`(Text + Spacer + 버튼 2개) 이라 줄을 더하면 레이아웃이 바뀌는데, 메뉴바 팝오버는
+띄워서 눈으로 확인할 수 없는 표면이라(앱을 띄우면 라이브 계정 데이터를 건드린다) 회귀를
+검증할 수 없다. 상류와 공유하는 파일이라 rebase 충돌 면적도 늘어난다. **자동** 덮어쓰기를
+코드로 닫고, **수동** 덮어쓰기는 이 문서의 위 절차로 막는 쪽이 비용 대비 방어가 크다.
+
+### `release.sh` 는 이 포크에서 돌지 않는다
+
+`release.sh` 는 **상류 저장소**로 배포하며(`REPO`/`TAP_REPO` = `chattymin/*`), 3/8 단계의 범프가
+`VERSION="..."` 를 평평한 리터럴로 덮어써 위 두 변수 표기를 조용히 지운다. `FORK_BUILD=` 가
+있으면 즉시 중단하는 가드를 스크립트 앞에 뒀다(가드가 없으면 `PREV` grep 이 `+` 때문에 매치에
+실패해 `set -e` 로 아무 설명 없이 죽는다). `--check-only` 는 여전히 쓸 수 있다.
+
+### Mobius 본체(`chussum/mobius`)의 변경을 가져올 때
+
+계정 전환 엔진은 `/Users/sun/orca/mobius` 의 `Sources/MobiusCore/` 를 **무수정 복사**한 것이다
+(§왜 이식이 싼가). 본체가 업데이트되면 같은 파일들을 다시 복사하되:
+
+```bash
+cp -R /Users/sun/orca/mobius/Sources/MobiusCore/. Sources/MobiusCore/
+cp -R /Users/sun/orca/mobius/Tests/MobiusCoreTests/. Tests/MobiusCoreTests/
+git diff -- Sources/MobiusCore/MobiusEnvironment.swift   # ← 반드시 확인
+```
+
+★ **`Sources/MobiusCore/MobiusEnvironment.swift` 의 `appSupportDirOverride` 는 이 포크의
+유일한 수정 지점이라 보존해야 한다** (§코드 배치: "수정 1곳(appSupport 주입)만 허용").
+통째로 덮으면 주입이 사라져 계정 데이터가 `~/Library/Application Support/PokeTokenBar/mobius/`
+가 아니라 **원본 Mobius.app 의 `…/Mobius/` 로 되돌아간다** — 에러 없이, 두 앱이 같은 파일을
+쓰는 상태로. 복사 후 이 한 파일의 diff 를 눈으로 보고 주입을 되살린 뒤 `./scripts/test-gate.sh`
+(`MobiusDataMigrationTests`·`MobiusLaunchSequenceTests` 가 경로를 잠근다).
+
+새 파일이 생겼으면 `Package.swift` 는 디렉터리 단위라 손댈 필요가 없지만,
+`scripts/test-gate.sh` 의 `LOGIC_CORE` 화이트리스트에 추가할지는 판단한다(커버리지 게이트 대상).
 
 ## 앱 시작 순서 (`MobiusLaunchSequence`)
 
