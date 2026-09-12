@@ -358,7 +358,10 @@ final class AccountsState: ObservableObject {
     /// 앞 틱이 살아 있으면 새로 띄우지 않는다(`tickInFlight` 와 같은 뜻이지만, 이쪽이 보장하는
     /// 것은 "핸들이 늘 하나"다 — 두 개가 되면 `stop()` 이 그중 하나만 취소하게 된다).
     /// 핸들은 취소 시점이 아니라 **틱이 실제로 끝날 때** 비운다: `stop()` 직후 `start()` 가
-    /// 와도 죽어가는 틱의 `defer` 가 새 핸들을 덮어쓰지 못한다.
+    /// 와도 죽어가는 틱의 `defer` 가 새 핸들을 덮어쓰지 못한다. 그 대가로, 껐다 곧바로 켜면
+    /// 즉시 틱 **한 번**이 생략될 수 있다(취소된 틱이 아직 안 끝난 동안). 3초 뒤 타이머가
+    /// 이어받으므로 손실은 거기까지고, 반대쪽 실수(핸들이 둘)는 `stop()` 이 그중 하나만
+    /// 취소하게 만들어 이 수정 자체를 무력화한다.
     private func scheduleTick() {
         guard tickTask == nil else { return }
         tickTask = Task { @MainActor in
