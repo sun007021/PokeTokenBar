@@ -27,6 +27,9 @@ FORK_BUILD="1"
 VERSION="$UPSTREAM_VERSION+mobius.$FORK_BUILD"
 BUNDLE_VERSION="$UPSTREAM_VERSION.$FORK_BUILD"
 APP_NAME="PokeTokenBar"
+# Finder·메뉴·정보 창에 보이는 표시 이름만 다르게 한다 — CFBundleName(실행파일 이름과 결합돼
+# 위 불변식에 걸림, 15자 제한도 있음)은 그대로 두고 CFBundleDisplayName 만 추가한다.
+DISPLAY_NAME="PokeTokenBar Extended"
 BUILD_DIR="build"
 APP="$BUILD_DIR/$APP_NAME.app"
 
@@ -48,6 +51,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleIdentifier</key><string>io.github.chattymin.poketokenbar</string>
     <key>CFBundleName</key><string>$APP_NAME</string>
+    <key>CFBundleDisplayName</key><string>$DISPLAY_NAME</string>
     <key>CFBundleExecutable</key><string>$APP_NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
