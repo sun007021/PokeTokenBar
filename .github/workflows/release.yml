@@ -12,7 +12,7 @@ name: Release verification
 # independent "the tagged commit really is green" record.
 #
 # scripts/build-app.sh is also not CI-safe on its own: its last step pkills the running
-# app and replaces /Applications/PokeTokenBar.app. It is an install script, not a
+# app and replaces /Applications/PokeTokenBarExtended.app. It is an install script, not a
 # packaging script.
 
 on:

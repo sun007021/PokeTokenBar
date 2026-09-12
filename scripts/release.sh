@@ -44,7 +44,7 @@ doc_check() {
   local last_tag ui_changed shot_changed
   last_tag=$(git describe --tags --match "v*" --abbrev=0 2>/dev/null || echo "")
   if [[ -n "$last_tag" ]]; then
-    ui_changed=$(git diff --name-only "$last_tag"..HEAD -- 'Sources/PokeTokenBar/UI/' 2>/dev/null)
+    ui_changed=$(git diff --name-only "$last_tag"..HEAD -- 'Sources/PokeTokenBarExtended/UI/' 2>/dev/null)
     shot_changed=$(git diff --name-only "$last_tag"..HEAD -- 'assets/settings*' 'assets/screenshot*' 'assets/menubar*' 'assets/shiny*' 2>/dev/null)
     if [[ -n "$ui_changed" && -z "$shot_changed" ]]; then
       echo "  ⚠ UI 소스가 $last_tag 이후 변경됐으나 스크린샷(assets/) 갱신 없음 — README 이미지 stale 가능:"
@@ -54,7 +54,7 @@ doc_check() {
     fi
 
     local ui_feats new_assets
-    ui_feats=$(git log "$last_tag"..HEAD --format='%s' -- 'Sources/PokeTokenBar/UI/' 2>/dev/null \
+    ui_feats=$(git log "$last_tag"..HEAD --format='%s' -- 'Sources/PokeTokenBarExtended/UI/' 2>/dev/null \
                  | grep -iE '^(feat|feature)[(:]' || true)
     new_assets=$(git diff --name-only --diff-filter=A "$last_tag"..HEAD -- 'assets/' 2>/dev/null)
     if [[ -n "$ui_feats" && -z "$new_assets" ]]; then
@@ -109,6 +109,11 @@ CHECK
 
 IS_FORK=0
 grep -q '^FORK_BUILD=' scripts/build-app.sh && IS_FORK=1
+
+# 산출물 이름은 build-app.sh 의 APP_NAME 이 단일 진실이다 — 여기서 다시 적으면 개명 때 조용히
+# 어긋나고(실제로 어긋났다), 릴리스가 "빌드는 됐는데 zip 대상이 없다"로 죽는다.
+APP_NAME=$(sed -n 's/^APP_NAME="\(.*\)"$/\1/p' scripts/build-app.sh)
+[[ -n "$APP_NAME" ]] || { echo "✗ build-app.sh 에서 APP_NAME 을 읽지 못했습니다"; exit 1; }
 
 if [[ "${1:-}" == "--check-only" ]]; then
   if [[ $IS_FORK -eq 1 ]]; then fork_doc_check || true; else doc_check || true; fi
@@ -221,9 +226,9 @@ USAGE
   echo "  ⚠ build-app.sh 는 마지막에 실행 중인 앱을 pkill 하고 /Applications 를 교체합니다."
   ./scripts/build-app.sh >/dev/null || {
     echo "✗ 빌드 실패 (복구: git checkout scripts/build-app.sh)"; exit 1; }
-  rm -f build/PokeTokenBar.zip
-  ditto -c -k --keepParent build/PokeTokenBar.app build/PokeTokenBar.zip
-  BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" build/PokeTokenBar.app/Contents/Info.plist)
+  rm -f build/$APP_NAME.zip
+  ditto -c -k --keepParent build/$APP_NAME.app build/$APP_NAME.zip
+  BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" build/$APP_NAME.app/Contents/Info.plist)
   [[ "$BUILT" == "$VERSION" ]] || { echo "✗ 빌드 버전 불일치: $BUILT (복구: git checkout scripts/build-app.sh)"; exit 1; }
 
   echo "▶ 6/7 커밋 + 태그 + push"
@@ -245,9 +250,9 @@ attaches \`com.apple.quarantine\` to anything you download, and Gatekeeper refus
 unnotarized bundles, so unzip and clear the attribute before installing:
 
 \`\`\`bash
-unzip PokeTokenBar.zip
-xattr -d com.apple.quarantine PokeTokenBar.app
-cp -R PokeTokenBar.app /Applications/
+unzip $APP_NAME.zip
+xattr -d com.apple.quarantine $APP_NAME.app
+cp -R $APP_NAME.app /Applications/
 \`\`\`
 
 ### About this build
@@ -265,7 +270,7 @@ NOTE
     printf '### Changes\n\n' >> "$NOTES"
     cat "$PTB_NOTES_FILE" >> "$NOTES"
   fi
-  gh release create "$TAG" build/PokeTokenBar.zip --repo "$REPO" \
+  gh release create "$TAG" build/$APP_NAME.zip --repo "$REPO" \
     --title "PokeTokenBar $VERSION (mobius fork)" --target "$FORK_BRANCH" \
     --verify-tag --notes-file "$NOTES" || {
       rm -f "$NOTES"
@@ -327,9 +332,9 @@ perl -pi -e "s/VERSION=\"[0-9.]+\"/VERSION=\"$VERSION\"/" scripts/build-app.sh
 
 echo "▶ 4/8 빌드 + zip (push 전 검증 — 실패해도 범프 미커밋이라 origin/main 무손상)"
 ./scripts/build-app.sh >/dev/null
-rm -f build/PokeTokenBar.zip
-ditto -c -k --keepParent build/PokeTokenBar.app build/PokeTokenBar.zip
-BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" build/PokeTokenBar.app/Contents/Info.plist)
+rm -f build/$APP_NAME.zip
+ditto -c -k --keepParent build/$APP_NAME.app build/$APP_NAME.zip
+BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" build/$APP_NAME.app/Contents/Info.plist)
 [[ "$BUILT" == "$VERSION" ]] || { echo "✗ 빌드 버전 불일치: $BUILT (수동 복구: git checkout scripts/build-app.sh)"; exit 1; }
 
 echo "▶ 5/8 커밋 + push (빌드 성공 후)"
@@ -340,10 +345,10 @@ git push -q origin main
 echo "▶ 6/8 GitHub Release v$VERSION"
 NOTES_FILE="${PTB_NOTES_FILE:-}"
 if [[ -n "$NOTES_FILE" && -f "$NOTES_FILE" ]]; then
-  gh release create "v$VERSION" build/PokeTokenBar.zip --repo "$REPO" \
+  gh release create "v$VERSION" build/$APP_NAME.zip --repo "$REPO" \
     --title "PokeTokenBar v$VERSION" --target main --notes-file "$NOTES_FILE"
 else
-  gh release create "v$VERSION" build/PokeTokenBar.zip --repo "$REPO" \
+  gh release create "v$VERSION" build/$APP_NAME.zip --repo "$REPO" \
     --title "PokeTokenBar v$VERSION" --target main --notes "Release v$VERSION"
 fi
 

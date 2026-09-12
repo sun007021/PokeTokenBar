@@ -48,7 +48,7 @@ CI はすべてのプルリクエストで `swift build` と `swift test` を実
 - [Conventional Commits](https://www.conventionalcommits.org/) スタイルを使用:
   `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:` など。
 - プルリクエストテンプレートを記入してください。
-- **UI の変更**（`Sources/PokeTokenBar/UI/` 配下のすべて）は、PR で before/after を
+- **UI の変更**（`Sources/PokeTokenBarExtended/UI/` 配下のすべて）は、PR で before/after を
   説明してください。スクリーンショットや GIF は歓迎ですが任意です — 明確なテキスト説明で
   十分です。正式な `assets/` スクリーンショットは PR ごとではなくリリース時に
   再生成されます。
@@ -59,9 +59,9 @@ CI はすべてのプルリクエストで `swift build` と `swift test` を実
 従ってください（テストでも強制されます）:
 
 - **使用量ソースの追加**（新しい AI CLI）= `UsageProvider` プロトコル
-  (`Sources/PokeTokenBar/Core/UsageProvider.swift`) を新しい型ひとつで実装し、
+  (`Sources/PokeTokenBarExtended/Core/UsageProvider.swift`) を新しい型ひとつで実装し、
   `UsageStore.init` のデフォルト `providers:` 配列
-  (`Sources/PokeTokenBar/Core/UsageStore.swift`) に登録します。触れる必要があるのは
+  (`Sources/PokeTokenBarExtended/Core/UsageStore.swift`) に登録します。触れる必要があるのは
   この2箇所だけです。
 - **汎用的な動作はすべてのプロバイダーにわたって集計する必要があります**（今日/週/月の
   合計、消費ペースの段階、コンパニオンのリズム）。汎用的な計算を特定のプロバイダーに結び付けたり、

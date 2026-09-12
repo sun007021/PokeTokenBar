@@ -20,7 +20,7 @@ PTB_NOTES_FILE=/tmp/notes.md ./scripts/release.sh 2.1.1
 1. **test-gate** (`./scripts/test-gate.sh`) — 전체 테스트 + 로직 커버리지. 실패 시 중단.
 2. **문서 일관성 검토** — 정적 버전 배지·제거된 의존성(예: `ccusage`) 잔존을 자동 경고 + 아래 수동 체크리스트 출력. 경고 시 진행 여부를 묻는다.
 3. **VERSION 범프** (`scripts/build-app.sh`, 아직 미커밋).
-4. **빌드 + zip** (`build/PokeTokenBar.zip`) + 빌드 버전 일치 확인 — **push 전 검증**(실패해도 범프 미커밋이라 origin/main 무손상).
+4. **빌드 + zip** (`build/PokeTokenBarExtended.zip`) + 빌드 버전 일치 확인 — **push 전 검증**(실패해도 범프 미커밋이라 origin/main 무손상).
 5. **커밋 + push** (`git push origin main`, 빌드 성공 후).
 6. **GitHub Release** 생성 (노트는 `PTB_NOTES_FILE` 또는 최소 노트).
 7. **Homebrew cask** 버전 갱신 (`chattymin/homebrew-tap`).
@@ -59,11 +59,20 @@ status item(AX)→팝오버 오픈(AXPress)까지 7개 체크. 5단계는 터미
 
 ## 배포 후 검증
 
+이 포크는 Homebrew cask 를 쓰지 않는다 — cask 는 상류와 **같은 번들 경로**를 교체하므로
+`brew upgrade` 한 번에 포크가 상류 빌드로 덮인다(`docs/reference/mobius-integration.md`).
+릴리스 자산을 직접 받아 설치하고 버전을 확인한다.
+
 ```bash
-brew update && brew upgrade --cask poke-token-bar
+unzip ~/Downloads/PokeTokenBarExtended.zip -d ~/Downloads
+xattr -d com.apple.quarantine ~/Downloads/PokeTokenBarExtended.app
+cp -R ~/Downloads/PokeTokenBarExtended.app /Applications/
+/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" \
+  /Applications/PokeTokenBarExtended.app/Contents/Info.plist
 ```
 
-`brew list --cask --versions poke-token-bar` 와 `/Applications/PokeTokenBar.app` 버전이 새 버전인지 확인.
+> **상류 전용**: `brew update && brew upgrade --cask poke-token-bar` 로 검증하는 절차는
+> cask 를 유지하는 상류 저장소에만 해당한다.
 
 ## 서명 (2026-07-08 부터)
 

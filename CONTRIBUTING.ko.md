@@ -48,7 +48,7 @@ CI는 모든 풀 리퀘스트에서 `swift build`와 `swift test`를 실행합�
 - [Conventional Commits](https://www.conventionalcommits.org/) 스타일 사용:
   `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:` 등.
 - 풀 리퀘스트 템플릿을 채워 주세요.
-- **UI 변경** (`Sources/PokeTokenBar/UI/` 아래 무엇이든)은 PR에 before/after를
+- **UI 변경** (`Sources/PokeTokenBarExtended/UI/` 아래 무엇이든)은 PR에 before/after를
   설명해야 합니다. 스크린샷이나 GIF는 환영하지만 선택입니다 — 명확한 텍스트 설명이면
   충분합니다. 정식 `assets/` 스크린샷은 PR마다가 아니라 릴리스 때 재생성됩니다.
 
@@ -58,9 +58,9 @@ CI는 모든 풀 리퀘스트에서 `swift build`와 `swift test`를 실행합�
 따르세요 (테스트로도 강제됩니다):
 
 - **사용량 소스 추가** (새 AI CLI) = `UsageProvider` 프로토콜
-  (`Sources/PokeTokenBar/Core/UsageProvider.swift`)을 새 타입 하나로 구현하고
+  (`Sources/PokeTokenBarExtended/Core/UsageProvider.swift`)을 새 타입 하나로 구현하고
   `UsageStore.init`의 기본 `providers:` 배열
-  (`Sources/PokeTokenBar/Core/UsageStore.swift`)에 등록합니다. 이 두 곳만 손대면
+  (`Sources/PokeTokenBarExtended/Core/UsageStore.swift`)에 등록합니다. 이 두 곳만 손대면
   됩니다.
 - **범용 동작은 모든 프로바이더에 걸쳐 집계해야 합니다** (오늘/주/월 합계, burn tier,
   companion 리듬). 범용 계산을 한 프로바이더에만 붙이지 말고, 범용 경로에

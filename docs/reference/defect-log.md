@@ -645,7 +645,7 @@ read_when:
   #210 이 이 경로로 한국어 3줄(`PopoverView` 세션만료 안내)을 넣어 전 언어 사용자에게 한국어가 보일
   뻔했다. 가드가 답하는 질문("번역이 인자를 지켰나")과 결함의 질문("이 문구가 번역 대상이긴 한가")이
   다른 층이다. 그래서 표를 검사하지 말고 **소스를 스캔**한다(`LocalizedUILiteralTests`):
-  `Sources/PokeTokenBar/UI/**` 의 문자열 리터럴에 한글이 있으면 실패. 한국어 *주석*은 하우스 스타일이라
+  `Sources/PokeTokenBarExtended/UI/**` 의 문자열 리터럴에 한글이 있으면 실패. 한국어 *주석*은 하우스 스타일이라
   허용해야 해서 정규식이 아니라 문자 순회로 문자열/주석 상태를 추적한다 — `"https://x//경로"` 처럼
   리터럴 안의 `//` 를 주석으로 오인하면 진짜 결함을 놓친다(역검증에서 이 케이스로 반증함).
   새 프로바이더 UI 를 붙일 땐 같은 부류의 형제 문구(여기선 `claudeAuthExpiredTitle/Hint`)를 먼저 찾아
@@ -809,11 +809,11 @@ read_when:
   `localUser`)로 `AccountsState` 를 만들어 `start()` 와 `notify()` 를 그대로 부른다 — 가드를 지우면
   실제로 `AccountsState.swift:320` 에서 예외가 나며 빨간불(확인함). 소스 스캔 1건
   (`testEveryNotificationCenterUseInMobiusSourcesIsGuarded`)이 **앞으로 추가될** 사용처까지 덮는다
-  (`Sources/PokeTokenBar/Mobius/` 의 `UNUserNotificationCenter` 줄은 같은 함수 안에 선행
+  (`Sources/PokeTokenBarExtended/Mobius/` 의 `UNUserNotificationCenter` 줄은 같은 함수 안에 선행
   `AppEnv.isBundledApp` 이 있어야 한다). 부류 스윕에서 함께 본 것: `LoginFlow` 의
   `ASWebAuthenticationSession` 은 번들 밖에서도 **던지지 않고** 에러로 실패한다(실측: init 통과,
   `start()` 가 false + `Code=2` 에러) — 도달 가능하지만 결함 트리거가 아니라 가드를 넣지 않았다.
-  `Sources/PokeTokenBar/Mobius/` 에 `Bundle.main`·`Bundle.module`·`SMAppService` 사용처는 0개다.
+  `Sources/PokeTokenBarExtended/Mobius/` 에 `Bundle.main`·`Bundle.module`·`SMAppService` 사용처는 0개다.
 
 ## 상태 파일 이전·병합
 
