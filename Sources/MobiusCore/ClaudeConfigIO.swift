@@ -118,11 +118,42 @@ extension ClaudeConfigIO: ProviderConfigIO {
                                 tierDescription: tierDescription(from: block))
     }
 
-    /// "default_claude_max_20x" → "Max 20x" 정도의 사람이 읽는 문자열로
+    /// "default_claude_max_20x" → "Max 20X" 정도의 사람이 읽는 문자열로.
+    ///
+    /// 두 필드는 **다른 축**이다(실측 2026-09-12, `~/.claude.json` 의 `oauthAccount`):
+    ///  - `organizationType` = 플랜 그 자체 (`claude_pro`, `claude_max`)
+    ///  - `organizationRateLimitTier` = rate-limit 티어. Max 에서는 플랜보다 **더 상세**하지만
+    ///    (`default_claude_max_20x` → "Max 20X"), Pro 에서는 플랜 정보가 아예 없다
+    ///    (`default_claude_ai` = "claude.ai 개인 계정")
+    ///
+    /// 그래서 티어를 우선하되 **플랜을 담고 있을 때만** 쓴다. 우선순위를 그냥 뒤집으면 Pro 는
+    /// 고쳐지지만 Max 20x 사용자가 "Max" 로 퇴화한다(상세도 손실) — 한쪽만 보면 반대쪽이
+    /// 깨지는 자리다.
     static func tierDescription(from block: [String: Any]) -> String {
-        let tier = (block["organizationRateLimitTier"] as? String)
-            ?? (block["organizationType"] as? String) ?? ""
-        return tier.replacingOccurrences(of: "default_", with: "")
+        let tier = nonEmpty(block["organizationRateLimitTier"])
+        let type = nonEmpty(block["organizationType"])
+        if let tier, namesAPlan(tier) { return humanizedTier(tier) }
+        if let type { return humanizedTier(type) }
+        // 티어가 유일한 신호면 일반값이라도 그대로 보여준다 — 빈 줄보다는 낫고,
+        // `organizationType` 이 없던 기존 동작과도 같다.
+        return tier.map(humanizedTier) ?? ""
+    }
+
+    /// 플랜이 아니라 "claude.ai 개인 계정"을 뜻하는 일반 티어. **관찰한 값만** 담는다 —
+    /// 모르는 티어는 예전처럼 그대로 쓰므로 이 수정의 회귀 면적은 이 집합에 한정된다.
+    private static let genericRateLimitTiers: Set<String> = ["ai"]
+
+    private static func namesAPlan(_ raw: String) -> Bool {
+        !genericRateLimitTiers.contains(humanizedTier(raw).lowercased())
+    }
+
+    private static func nonEmpty(_ value: Any?) -> String? {
+        guard let string = value as? String, !string.isEmpty else { return nil }
+        return string
+    }
+
+    private static func humanizedTier(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "default_", with: "")
             .replacingOccurrences(of: "claude_", with: "")
             .replacingOccurrences(of: "_", with: " ")
             .capitalized

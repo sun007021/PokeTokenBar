@@ -34,6 +34,33 @@ final class AccountStoreTests: XCTestCase {
         XCTAssertEqual(try store.secret(for: p1.id)?.keychainBlob, Data("blob-p@x.com".utf8))
     }
 
+    /// 저장된 `tierDescription` 은 등록 시점에 **파생돼 저장된** 값이다. 표시 규칙이 바뀌어도
+    /// (예: Pro 가 `Ai` 로 찍히던 결함) 기존 계정은 재등록될 때까지 옛 문자열을 그대로 들고 있다 —
+    /// 사용자가 밟는 복구 경로는 같은 계정으로 다시 로그인하는 것(`LoginFlow` 의 `.refreshed`,
+    /// 곧 이 upsert)이므로 그 경로가 신원을 실제로 덮어쓰는지 못 박는다.
+    func testReloginRefreshesAStaleStoredTierDescription() throws {
+        let store = try AccountStore(env: env, keychain: kc)
+        let stale = try store.upsertProfile(
+            nickname: "p", provider: .claude,
+            identity: ProviderIdentity(emailAddress: "p@x.com", organizationName: "Org",
+                                       tierDescription: "Ai"),
+            secretData: Data("blob".utf8))
+        XCTAssertEqual(store.file.accounts.first?.tierDescription, "Ai")
+
+        // 같은 이메일로 다시 로그인 — 라이브 oauthAccount 에서 신원을 새로 뽑는다.
+        let refreshed = try store.upsertProfile(
+            nickname: "p", snapshot: CredentialsSnapshot(
+                keychainBlob: Data("blob2".utf8), credentialsFileData: Data("file2".utf8),
+                oauthAccountJSON: Data(#"""
+                {"emailAddress":"p@x.com","organizationName":"Org",
+                 "organizationType":"claude_pro","organizationRateLimitTier":"default_claude_ai"}
+                """#.utf8)))
+
+        XCTAssertEqual(refreshed.id, stale.id, "재로그인은 새 프로필이 아니라 갱신이다")
+        XCTAssertEqual(store.file.accounts.first?.tierDescription, "Pro",
+                       "재로그인이 신원을 갱신하지 않으면 낡은 플랜 표시를 고칠 방법이 없다")
+    }
+
     func testPersistenceRoundtrip() throws {
         let store = try AccountStore(env: env, keychain: kc)
         let p = try store.upsertProfile(nickname: "personal", snapshot: snap(email: "p@x.com"))

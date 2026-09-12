@@ -82,6 +82,23 @@ read_when:
   클램프 자체는 통과해도 `output + thoughts` 처럼 파싱 직후 더하는 곳에서 다시 트랩난다. 합산 여유가 있는
   상한(`maxParsedTokenValue`)을 쓴다. 회귀 가드는 프로바이더별로 **테스트를 쪼개라** — 트랩은 프로세스를
   끝내므로 한 테스트에 몰면 뒤 케이스가 아예 실행되지 않는다.
+- **두 필드 중 하나를 고르는 폴백은 "어느 사용자층에서 테스트했나"가 곧 정답의 범위다.**
+  `~/.claude.json` 의 `organizationType`(플랜: `claude_pro`·`claude_max`)과
+  `organizationRateLimitTier`(rate-limit 티어)는 **다른 축**인데, 카드의 플랜 표시가 티어를
+  무조건 우선했다. Max 에서는 티어가 플랜보다 상세해서(`default_claude_max_20x` → "Max 20X")
+  옳아 보였지만, **Pro 에서는 티어에 플랜 정보가 아예 없다**(`default_claude_ai` =
+  "claude.ai 개인 계정") → 카드에 **`Ai`** 가 찍혔다(사용자 리포트 2026-09-12). 원저자가
+  Max 사용자였다는 것이 그대로 코드의 적용 범위가 된 셈이다. **우선순위를 뒤집는 것은 수정이
+  아니다** — 그러면 Pro 는 고쳐지고 Max 20x 가 "Max" 로 퇴화한다(상세도 손실). 티어는 **플랜을
+  담고 있을 때만** 쓰고 아니면 `organizationType` 으로 폐백한다. 판별은 **관찰한 일반값 하나**
+  (`claude_ai`)만 걸러내는 형태로 좁게 둔다 — 모르는 티어는 예전 그대로라 회귀 면적이 0이다.
+  ★ **파생값을 저장하면 함수를 고쳐도 화면은 안 고쳐진다**: `tierDescription` 은 등록 시점에
+  `AccountStore.upsertProfile` 로 **저장**되고, `reconcile`·`adoptLiveAccountIfUnregistered`
+  둘 다 이 필드를 다시 쓰지 않는다(실측: 앱 재시작으로도 `Ai` 가 남는다). 복구는 그 계정으로
+  **다시 로그인**하는 것뿐이다(`LoginFlow` 의 `.refreshed` → 같은 upsert). 표시 규칙을 고칠
+  때는 **저장된 사본이 어디서 갱신되는지**를 같이 확인하라. 가드: `ClaudeConfigIOTests` 의
+  플랜 6건(수정 전 Pro 케이스가 빨갛다) + `AccountStoreTests
+  .testReloginRefreshesAStaleStoredTierDescription`.
 
 ## 외부 로그·사용량 소스
 
