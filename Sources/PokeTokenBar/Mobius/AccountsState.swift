@@ -1968,16 +1968,20 @@ final class AccountsState: ObservableObject {
         // 갈라진다 — 전환과 같은 관문으로 막는다.
         guard !externalAppBlocksSwitching() else { return }
         guard loginFlow == nil else { return } // 진행 중이면 중복 실행 방지
-        // 계정 추가는 `claude auth login`으로 동작 — CLI가 없으면 설정에서 설치하도록 안내
-        guard ClaudeCLI.isInstalled else {
-            lastError = l.accountsErrorClaudeCLIMissing
-            notify(title: l.accountsNotifyClaudeCLINeededTitle,
-                   body: l.accountsNotifyClaudeCLINeededBody)
-            return
-        }
         let flow = LoginFlowController(io: io, store: store, switcher: switcher)
         loginFlow = flow
         Task { @MainActor in
+            // 계정 추가는 `claude auth login`으로 동작 — CLI가 없으면 설정에서 설치하도록 안내.
+            // 탐색은 대화형 로그인 셸을 띄울 수 있어(초 단위) **메인에서 기다리지 않는다** —
+            // 여기서 동기로 부르면 버튼을 누른 순간 팝오버가 통째로 멈춘다.
+            guard await Task.detached(priority: .userInitiated,
+                                      operation: { ClaudeCLI.isInstalled }).value else {
+                lastError = l.accountsErrorClaudeCLIMissing
+                notify(title: l.accountsNotifyClaudeCLINeededTitle,
+                       body: l.accountsNotifyClaudeCLINeededBody)
+                loginFlow = nil
+                return
+            }
             do {
                 switch try await flow.run() {
                 case .added(let profile):

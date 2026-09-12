@@ -495,6 +495,25 @@ read_when:
   `writeAndFlush` 로 묶는다. `AppLog.writeAndFlush` 는 테스트된 `backend.writeAndFlush` 를
   타야 한다 — `write()`+`flush()` 두 번째 쌍은 가드가 안 되고, `flush()` 만 빼면 스위트가
   초록인데 #174 가 다시 산다. (#174)
+- **외부 CLI 의 경로를 `zsh -lc` 로 찾지 마라 — 버전매니저 설치가 통째로 안 보인다.** 비대화형
+  로그인 셸은 `.zshrc` 를 읽지 않는다. nvm·mise·asdf 는 PATH 주입을 거기서 하므로
+  `~/.nvm/versions/node/<ver>/bin/claude` 같은 설치는 **설치돼 있는데 "없음"** 이 된다(실측:
+  계정 추가가 "Claude Code CLI 가 필요합니다" 로 막혔다 — 그 Mac 에 claude 는 있었다).
+  같은 자리에서 두 번째 함정이 겹친다: rc 는 stdout 에 장식 문구를 찍을 수 있어
+  `command -v` 출력의 **첫 줄을 경로로 삼으면** 실행 불가 경로가 나온다. 버전 디렉터리를
+  고정 후보에 박는 것은 해법이 아니다 — 버전이 올라가면 조용히 낡는다. 이 저장소의 답은
+  이미 있었다: `BinaryLocator.resolve` 가 대화형 로그인 셸(`-ilc`)로 찾고 결과를 마커
+  (`<<<BIN:…:BIN>>>`)로 감싸 두 함정을 **구조적으로** 없앤다. Codex 는 처음부터 그 경로를
+  써서 같은 Mac 에서 멀쩡했고, 이식해 온 Claude 쪽만 자기 해석기를 들고 있었다 —
+  §외부 로그·사용량 소스의 "형제 인프라를 우회한 탓" 과 같은 부류다. 새 외부 도구를 부를 때
+  경로 해석은 `BinaryLocator` 한 곳이고, 실행 환경은 `BinaryLocator.augmentedEnvironment`
+  (해석된 실행파일의 **자기 디렉터리**가 맨 앞 — nvm 은 node 가 claude 옆에 있다)로 만든다.
+  **탐색은 메인 스레드에서 기다리지 않는다**: 대화형 셸은 실측 0.9초, 상한 8초라 버튼 핸들러가
+  그대로 UI 정지가 된다(`AccountsState.addAccount` 는 `Task.detached` 뒤로 옮겼다).
+  회귀 가드는 `ClaudeCLIResolutionTests` — 셸 **스텁**으로 "그 디렉터리는 rc 만 PATH 에 넣는다"
+  와 "rc 가 stdout 에 장식을 찍는다"를 재현한다(개발자 Mac 의 실제 설치에 의존하면 머신마다
+  판정이 갈려 아무것도 못 지킨다). 수정 전 구현으로 되돌리면 5건 중 3건이 빨개지는 것을
+  확인했다. (사용자 리포트: 계정 추가 실패, 2026-09-12.)
 
 ## 표시·UI
 

@@ -105,9 +105,8 @@ final class LoginFlowController: NSObject, ASWebAuthenticationPresentationContex
     }
 
     private func launchLoginAndCaptureURL() async throws -> URL {
-        // claude를 셸 PATH에 의존하지 않고 절대경로로 찾는다 — GUI(Finder) 실행 시 앱의 최소
-        // 환경에선 `zsh -lc`가 .zshrc를 안 읽어 claude를 못 찾는다(계정 추가 실패의 원인).
-        // 로그인 셸 폴백이 최대 5초 블록될 수 있어 해석은 백그라운드에서.
+        // claude를 셸 PATH에 의존하지 않고 절대경로로 찾는다 — GUI(Finder) 실행 시 앱은
+        // 로그인 셸 환경을 상속하지 않는다. 해석이 셸을 띄울 수 있어 백그라운드에서.
         guard let claudePath = await Task.detached(priority: .userInitiated,
                                                    operation: { Self.resolveClaudeBinary() }).value
         else { throw LoginFlowError.claudeNotFound }
@@ -117,8 +116,10 @@ final class LoginFlowController: NSObject, ASWebAuthenticationPresentationContex
         // proc가 곧 script(1)이라 terminate/kill(-pid)로 claude까지 정리된다.
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/script")
         proc.arguments = ["-q", "/dev/null", claudePath, "auth", "login"]
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = Self.augmentedPATH(env["PATH"])   // claude 및 claude가 spawn하는 하위 프로세스 해석용
+        // claude 및 claude 가 spawn 하는 하위 프로세스(node 등) 해석용. 해석된 실행파일의
+        // **자기 디렉터리**가 맨 앞에 붙는 것이 핵심이다 — nvm 처럼 버전 디렉터리 안에 node 와
+        // claude 가 같이 있는 설치에서, 고정 목록만 얹으면 node 를 못 찾는다.
+        var env = BinaryLocator.augmentedEnvironment(binaryPath: claudePath)
         let files = try makeBrowserHook()
         browserHookFiles = files
         env["BROWSER"] = files.hook.path
@@ -172,49 +173,11 @@ final class LoginFlowController: NSObject, ASWebAuthenticationPresentationContex
         throw LoginFlowError.urlNotFound
     }
 
-    /// GUI 앱 최소 PATH에 claude 표준 설치 경로들을 앞에 붙인다(셸 설정 무관).
-    nonisolated static func augmentedPATH(_ existing: String?) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        var parts = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin",
-                     "\(home)/.claude/local"]
-        if let existing, !existing.isEmpty { parts.append(existing) }
-        parts.append(contentsOf: ["/usr/bin", "/bin", "/usr/sbin", "/sbin"])
-        var seen = Set<String>()
-        return parts.filter { !$0.isEmpty && seen.insert($0).inserted }.joined(separator: ":")
-    }
-
-    /// claude 실행파일 절대경로 — 표준 위치 우선, 없으면 대화형 로그인 셸(.zshrc 소싱) 폴백.
-    /// 블로킹(로그인 셸 폴백)이 있으니 백그라운드에서 호출한다.
-    nonisolated static func resolveClaudeBinary() -> String? {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let fm = FileManager.default
-        let candidates = ["\(home)/.local/bin/claude", "/opt/homebrew/bin/claude",
-                          "/usr/local/bin/claude", "\(home)/.claude/local/claude"]
-        for c in candidates where fm.isExecutableFile(atPath: c) { return c }
-        // 폴백: `zsh -ilc`(대화형 → .zshrc 소싱)로 사용자 PATH에서 조회. `-lc`(비대화형)는 실패.
-        if let p = viaLoginShell(), fm.isExecutableFile(atPath: p) { return p }
-        return nil
-    }
-
-    private nonisolated static func viaLoginShell() -> String? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        proc.arguments = ["-ilc", "command -v claude"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-        do { try proc.run() } catch { return nil }
-        // 최대 5초 폴링 — 무거운 .zshrc가 늦게 끝나도 계정 추가가 영영 안 막히게.
-        // (command -v 출력은 한 줄이라 파이프가 안 차 데드락 없음.)
-        let deadline = Date().addingTimeInterval(5)
-        while proc.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        if proc.isRunning { proc.terminate(); return nil }
-        guard let data = try? pipe.fileHandleForReading.readToEnd(),
-              let out = String(data: data, encoding: .utf8)?
-                  .trimmingCharacters(in: .whitespacesAndNewlines), !out.isEmpty
-        else { return nil }
-        return out.split(separator: "\n").first.map(String.init)
-    }
+    /// claude 실행파일 절대경로. 해석이 대화형 로그인 셸을 띄울 수 있어(최대 8초 블록)
+    /// 백그라운드에서 호출한다. 해석은 `ClaudeCLI` → `BinaryLocator` 한 곳으로 모은다 —
+    /// 여기서 따로 후보 목록과 셸 조회를 들고 있으면 "계정 추가 버튼은 없다고 하는데 로그인은
+    /// 뜬다"(또는 그 반대)처럼 두 판정이 갈린다.
+    nonisolated static func resolveClaudeBinary() -> String? { ClaudeCLI.resolvedPath() }
 
     private func presentAuthWindow(url: URL) {
         // 앱을 활성화해야 인증 창이 앞으로 온다 (메뉴바 앱은 기본 비활성)
