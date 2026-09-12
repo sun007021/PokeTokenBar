@@ -242,6 +242,54 @@ final class AccountsState: ObservableObject {
     /// 게이팅되므로(아래 reconcile/스냅샷 싱크) 이 값은 **반응 지연의 상한**에 가깝다.
     static let tickInterval: TimeInterval = 3
     static let reconcileInterval: TimeInterval = 15
+
+    // MARK: 세션 로그 스캔 주기 (적응형)
+
+    /// 세션 로그를 마지막으로 스캔한 시각.
+    private var lastSessionLogScanAt = Date.distantPast
+    /// 직전 틱이 본 활성 계정들 — 스캔을 건너뛰던 중에 전환이 일어났는지 보는 값.
+    private var lastTickActiveByProvider: [Provider: UUID] = [:]
+    /// **세션이 안 도는 동안의** 스캔 주기. 도는 동안은 매 틱(`tickInterval`).
+    ///
+    /// 스캔은 틱 안에서 유일하게 비용이 로그 트리 크기에 비례하는 작업이다(열거 + 파일당 stat).
+    /// 실측 환경(Claude 205MB/147개 + Codex 548MB/515개)에서 이 앱의 유휴 CPU 를 눈에 띄게
+    /// 올리는 단일 항목이었다. 그런데 **아무 세션도 안 도는 동안에는 스캔이 아무것도 낼 수 없다** —
+    /// 그때가 배터리가 가장 아까운 시간이다(노트북이 그냥 켜져 있는 상태).
+    static let idleSessionLogScanInterval: TimeInterval = 15
+
+    /// 지금 세션 로그를 스캔해야 하는가.
+    ///
+    /// 신호는 워처가 이미 들고 있는 `lastActivity`(= 지금까지 본 세션 파일 mtime 의 최댓값)다.
+    /// 판정 기준은 워처 **자신의** `recentWindow` 를 그대로 쓴다 — 그 창보다 오래된 파일은
+    /// 스캔해도 파싱 대상에서 걸러지므로, "마지막 활동이 그 창 밖" 이면 직전 스캔이 **구조적으로
+    /// 이벤트를 낼 수 없었다**는 뜻이다(임의의 휴리스틱이 아니라 워처의 필터와 같은 기준).
+    ///
+    /// ★ 이 게이트가 **잃지 않는 것**:
+    ///  - 데이터. 오프셋은 유지되므로 건너뛴 동안의 append 는 다음 스캔이 통째로 읽는다.
+    ///  - 파일. `recentWindow`(600초)가 스캔 주기(15초)보다 훨씬 길어, 건너뛰는 사이에 파일이
+    ///    "최근" 창 밖으로 빠져나갈 수 없다.
+    ///  - 재진입. 신호는 스캔이 갱신하므로 자기참조처럼 보이지만, 유휴 모드에서도 15초마다는
+    ///    돌기 때문에 새 활동은 늦어도 그 안에 잡히고 즉시 매 틱 모드로 돌아온다.
+    ///
+    /// ★ 대가는 **지연 하나**다: 로그가 완전히 조용했던 뒤 도착하는 **첫** hit 의 검출이 최악
+    /// +12초(15초 − 틱 3초). 그 뒤로는 활동이 최신이라 매 틱으로 돌아온다. 소진 판정은 그
+    /// 뒤에 usage API 왕복과 분 단위 검증 쿨다운(`HitAttribution.cooldown` 180초)을 더 태우므로
+    /// 이 12초는 전환 지연의 지배 항이 아니다.
+    static func sessionLogScanIsDue(now: Date, lastActivity: Date?, lastScanAt: Date,
+                                    activeWindow: TimeInterval,
+                                    idleInterval: TimeInterval,
+                                    activeChanged: Bool) -> Bool {
+        // 활성이 바뀐 틱은 주기와 무관하게 스캔한다 — 위 라우터 격리 창(정확성) 때문이다.
+        if activeChanged { return true }
+        // nil = 아직 세션 파일을 하나도 못 봤다(빈 로그, 또는 첫 틱). 유휴 갈래로 내려가되
+        // 첫 틱은 `lastScanAt` 이 `.distantPast` 라 아래 조건이 참이므로 지연 없이 프라이밍된다.
+        if let lastActivity, now.timeIntervalSince(lastActivity) <= activeWindow { return true }
+        return now.timeIntervalSince(lastScanAt) >= idleInterval
+    }
+
+    /// 테스트 전용 — 스캔을 **실제로 돈** 횟수. 게이트가 "돌지 않았다"를 증명하려면 결과가
+    /// 아니라 행위를 봐야 한다 — 빈 로그에서는 돌아도 hit 이 0이라 결과로는 구분이 안 된다.
+    private(set) var sessionLogScanCountForTesting = 0
     static let activeSnapshotSyncInterval: TimeInterval = 5 * 60 // 활성 계정 토큰 스냅샷 동기화
     // 만료 임박 폴백 자동 refresh: 1시간마다 스윕, 만료 3일 전부터, 계정당 최소 6시간 간격.
     private var lastProactiveRefreshSweepAt = Date.distantPast
@@ -1063,10 +1111,34 @@ final class AccountsState: ObservableObject {
         // 동기 블록된다 — 백그라운드로 옮겼다는 사실이 안전을 뜻하지 않는다. 공유된 락이
         // 두 경로를 도로 붙인다. 지금은 그 두 접근자가 스캔 락과 분리된 경량 락을 쓰므로
         // 안전하지만, **워처에 새 접근자를 추가할 때 스캔 락을 잡게 하지 말 것.**
-        let claudeWatcher = watcher, codexWatcher = self.codexWatcher
-        let (claudeHits, codexBatches) = await Task.detached(priority: .utility) {
-            (claudeWatcher.scan(now: now), codexWatcher.scanBatches(now: now))
-        }.value
+        // ★ 세션이 안 도는 동안은 저빈도로 — 근거·대가는 `sessionLogScanIsDue` 주석.
+        //   단 **활성 계정이 바뀐 틱에서는 유휴여도 반드시 스캔한다.** `CodexStatusRouter` 는
+        //   활성이 바뀐 순간의 `trackedFiles`(= 직전 스캔 완료 시점 스냅샷)로 전환 전 세션
+        //   파일을 격리하는데, 그 스냅샷이 낡으면 전환 직전에 시작된 세션이 격리되지 않아
+        //   옛 계정의 사용량이 새 계정에 박힌다(연쇄 전환). 이 한 줄이 그 창을 스캔 주기가
+        //   아니라 **틱 주기**로 되돌려, 주기를 늘리면서도 정확성은 손대지 않게 한다.
+        let activeByProvider = store.file.activeByProvider
+        let activeChanged = activeByProvider != lastTickActiveByProvider
+        lastTickActiveByProvider = activeByProvider
+        let claudeHits: [RateLimitHit]
+        let codexBatches: [SessionLogWatcher<MobiusCore.CodexRateLimitStatus>.Batch]
+        if Self.sessionLogScanIsDue(
+            now: now,
+            lastActivity: [watcher.lastActivity, codexWatcher.lastActivity].compactMap { $0 }.max(),
+            lastScanAt: lastSessionLogScanAt,
+            activeWindow: min(watcher.recentWindow, codexWatcher.recentWindow),
+            idleInterval: Self.idleSessionLogScanInterval,
+            activeChanged: activeChanged)
+        {
+            lastSessionLogScanAt = now
+            sessionLogScanCountForTesting += 1
+            let claudeWatcher = watcher, codexWatcher = self.codexWatcher
+            (claudeHits, codexBatches) = await Task.detached(priority: .utility) {
+                (claudeWatcher.scan(now: now), codexWatcher.scanBatches(now: now))
+            }.value
+        } else {
+            (claudeHits, codexBatches) = ([], [])
+        }
 
         // Claude: 세션 로그의 rate-limit 에러 이벤트.
         // 주의(upstream 293a911): 인증 만료(authentication_failed) 로그는 "어느 계정" 것인지
@@ -1597,18 +1669,20 @@ final class AccountsState: ObservableObject {
         // 취소는 `await` 지점에서만 들리는데 틱에는 그 지점이 여럿이다 — 스캔·usage 조회를
         // 지나 여기 도착했을 때는 이미 `stop()` 이 끝나 있을 수 있다.
         guard !Task.isCancelled else { return }
-        // ★ 같은 이유로 이중 writer 가드도 여기서 한 번 더 본다. 이 틱은 `preflightFallback`
-        // 의 `await` 를 지나오는데, 그 사이에 Mobius.app 이 뜨면 위 취소 확인은 이미 통과한
-        // 뒤다 — 확인을 입구에만 두면 "감지했는데도 한 번 더 전환한" 경우가 남는다.
-        // ★ 그 가드보다 **먼저** 빠져나간다. `externalAppBlocksSwitching()` 은 LaunchServices
-        // 조회(`NSRunningApplication`)를 돌리는데, 이 함수는 프로바이더마다 **매 틱** 불리므로
-        // 결정이 없는 평시에도 3초당 2회 조회가 상시로 깔린다 — 감시 폴링을 이벤트 구동으로
-        // 바꿔도 이쪽이 남으면 유휴 비용은 그대로다. 판정이 "아무것도 하지 않음"이면 자격증명도
-        // 알림도 건드리지 않으므로 가드가 지킬 것이 없다(가드는 **쓰기 직전**에만 의미가 있다).
+        // 적용할 것이 없으면 여기서 끝 — 아래 가드보다 **먼저** 빠져나간다.
+        // `externalAppBlocksSwitching()` 은 LaunchServices 조회(`NSRunningApplication`)를 돌리는데
+        // 이 함수는 프로바이더마다 **매 틱** 불리므로, 결정이 없는 평시에도 3초당 2회 조회가
+        // 상시로 깔린다(감시 폴링을 이벤트 구동으로 바꿔도 이쪽이 남으면 유휴 비용은 그대로다).
+        // 판정이 "아무것도 하지 않음"이면 자격증명도 알림도 안 건드리므로 가드가 지킬 것이 없다 —
+        // 가드는 **쓰기 직전**에만 의미가 있다.
         if case .none = decision { return }
+        // ★ 취소 확인과 같은 이유로 이중 writer 가드도 여기서 한 번 더 본다. 이 틱은
+        // `preflightFallback` 의 `await` 를 지나오는데, 그 사이에 Mobius.app 이 뜨면 위 취소
+        // 확인은 이미 통과한 뒤다 — 확인을 입구에만 두면 "감지했는데도 한 번 더 전환한" 경우가
+        // 남는다.
         guard !externalAppBlocksSwitching() else { return }
         switch decision {
-        case .none: break   // 위에서 이미 반환된다 — 전수성 유지용
+        case .none: break   // 위에서 이미 반환됐다 — switch 전수성 유지용
         case .allExhausted:
             notify(title: l.accountsNotifyAllExhaustedTitle(provider.displayName),
                    body: l.accountsNotifyAllExhaustedBody)
