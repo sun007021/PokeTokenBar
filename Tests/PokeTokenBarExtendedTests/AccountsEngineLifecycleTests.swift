@@ -45,6 +45,11 @@ final class AccountsEngineLifecycleTests: XCTestCase {
             사용자가 연 가이드 캡처. 이미 원래 Desktop 로그인을 치워 둔(stash) 상태이고 되돌리는 \
             경로는 endDesktopCapture() 하나뿐이라, 취소만 하면 사용자의 로그인이 로그아웃된 채 남는다.
             """,
+        "desktopCaptureRestoreTask": """
+            endDesktopCapture()의 복원(종료→stash 복원→재실행). 시작 전에 desktopCaptureStash를 \
+            이미 nil로 비웠으므로 이 태스크 자체가 그 stash를 되돌릴 유일한 경로다 — 끊으면 Desktop이 \
+            로그아웃된 채 남고 되돌릴 방법이 없어진다.
+            """,
     ]
 
     func testEveryBackgroundTaskFieldIsEitherCancelledByStopOrDocumented() throws {

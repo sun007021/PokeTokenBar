@@ -1306,6 +1306,12 @@ struct L {
     func accountsErrorSwitchFailed(_ detail: String) -> String {
         koEn("전환 실패: \(detail)", "Switch failed: \(detail)")
     }
+    /// 이미 진행 중인 수동 전환이 있을 때 두 번째 클릭을 거절하며 보여준다(`manualSwitch` 재진입
+    /// 가드) — `accountsErrorDesktopSwitchBusy` 와 같은 성격.
+    var accountsErrorSwitchBusy: String {
+        koEn("이미 계정을 전환하는 중입니다 — 잠시 후 다시 시도하세요.",
+             "Already switching accounts — try again in a moment.")
+    }
     func accountsErrorSetPrimaryFailed(_ detail: String) -> String {
         koEn("Primary 변경 실패: \(detail)", "Couldn’t change the primary account: \(detail)")
     }

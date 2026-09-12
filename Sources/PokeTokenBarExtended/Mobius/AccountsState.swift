@@ -32,6 +32,11 @@ final class AccountsState: ObservableObject {
     // 수동 전환 낙관적 표시 — 클릭 즉시 이 계정을 활성으로 보여주고(스무스), 실제 refresh+스왑은
     // 백그라운드에서. 완료되면 nil로 정착(실제 activeAccountID가 인계).
     @Published private(set) var pendingSwitchID: UUID?
+    /// 진행 중인 수동 전환 태스크 — `manualSwitch(to:)` 의 재진입 가드 겸 `stop()` 취소 대상.
+    /// `pendingSwitchID` 와 항상 같이 세팅/해제된다(둘 다 같은 `defer` 가 담당). 두 계정을
+    /// 빠르게 연속 클릭하면 독립된 두 태스크가 경합해 나중에 끝난 쪽이 이겨 사용자가 마지막에
+    /// 누른 계정과 최종 활성이 달라질 수 있었다 — `desktopSwitchTask` 와 같은 패턴으로 막는다.
+    private var manualSwitchTask: Task<Void, Never>?
     private var usageTask: Task<Void, Never>?
     // 비활성 codex 게이지 프로브 — 단일 플라이트 핸들 + 순수 조회기. 게이지 전용(마킹 없음).
     private var codexUsageTask: Task<Void, Never>?
@@ -588,7 +593,17 @@ final class AccountsState: ObservableObject {
     /// 쓰는 구간은 전부 **동기**이거나(`switcher.switchTo`, `store.withCredentialLock` 블록)
     /// 취소가 전파되지 않는 `Task {}` 쉴드 안에 있다(`FallbackAuthChecker.inFlight`,
     /// `CodexTokenRefresher` 호출부). 회전된 refresh 토큰을 서버가 소비한 뒤 저장 전에 끊겨
-    /// 계정이 벽돌이 되는 경로는 그래서 존재하지 않는다.
+    /// 계정이 벽돌이 되는 경로는 그래서 존재하지 않는다. 같은 잣대로 `manualSwitchTask` 도
+    /// 안전하다 — 그 안의 자격증명 쓰기(`performSwitch` → `switcher.switchTo`)도 동기라서,
+    /// 취소는 그 앞의 `await`(preflight/quiesce)에서만 걸리고 쓰기 도중에는 걸리지 않는다.
+    /// `addAccountTask` 도 마찬가지다 — `LoginFlowController.run()` 의 자격증명 등록 구간은
+    /// 라이브 스냅샷을 안정적으로 감지(두 번 읽어 일치 확인)한 **뒤에만** 실행되는 연속 동기
+    /// 블록이라 취소가 그 중간에 끼어들 수 없고, 감지 전에 끊기면 `cleanup()` 이 PTY 프로세스·
+    /// 인증창·임시파일을 정리해 반쯤 쓴 상태를 남기지 않는다(타임아웃·사용자 취소와 같은 경로).
+    /// 드물게 CLI가 이미 로그인을 끝냈는데 우리가 그걸 감지하기 전에 끊기면(라이브 로그인은
+    /// 바뀌었지만 우리 계정 목록엔 미등록) 엔진이 다시 돌 때 `tick()` 의 reconcile
+    /// (`adoptLiveAccountIfUnregistered`)이 그 계정을 자동으로 흡수한다 — Desktop 캡처의 stash 와
+    /// 달리 되돌릴 장치가 없는 게 아니라 **엔진 재개가 스스로 되돌린다.**
     ///
     /// 취소하지 **않는** 것(의도적):
     ///  - `desktopSwitchTask` — Desktop 종료 → 프로필 스왑 → 재실행의 중간에서 끊으면 Desktop
@@ -596,6 +611,10 @@ final class AccountsState: ObservableObject {
     ///  - `desktopCaptureTask` — 사용자가 연 가이드 캡처. 이미 **원래 Desktop 로그인을 치워
     ///    둔(stash)** 상태이고 되돌리는 경로는 `endDesktopCapture()` 하나뿐이라, 여기서 취소만
     ///    하면 사용자의 Desktop 로그인이 로그아웃된 채 남는다.
+    ///  - `desktopCaptureRestoreTask` — `endDesktopCapture()` 자신이 만드는 복원 태스크(종료→
+    ///    stash 복원→재실행). 시작 전에 `desktopCaptureStash` 를 이미 nil 로 비우므로 이 태스크가
+    ///    그 stash 를 되돌릴 **유일한** 경로다 — 위 `desktopCaptureTask` 보다도 더 끊으면 안 된다:
+    ///    끊었다가는 복원 자체가 없던 일이 되고 재시도할 상태도 남지 않는다.
     ///  - `startEngine()` 의 Keychain 워밍업(`Task.detached`) — 취소 지점이 없는 동기 읽기 1회다.
     private func stopEngine() {
         timer?.invalidate()
@@ -612,6 +631,8 @@ final class AccountsState: ObservableObject {
         codexUsageTask?.cancel()
         fallbackLocalTask?.cancel()
         desktopAutoCaptureTask?.cancel()
+        manualSwitchTask?.cancel()
+        addAccountTask?.cancel()
     }
 
     /// 테스트 전용 — 지금 스케줄된 틱 타이머. **객체 자체**를 내주는 이유는 `stop()` 이 필드를
@@ -630,6 +651,11 @@ final class AccountsState: ObservableObject {
     /// 실제로 끝나는지(`await value`)를 둘 다 봐야 "stop()이 진행 중인 작업을 걷었다"가
     /// 증명된다. 타이머와 달리 이건 **이미 돌고 있는** 작업이라 무효화만으로는 안 멈춘다.
     var tickTaskForTesting: Task<Void, Never>? { tickTask }
+
+    /// 테스트 전용 — 진행 중인 수동 전환 태스크. `manualSwitch(to:)` 의 재진입 가드가 **실제로**
+    /// 두 번째 호출을 막는지, 그리고 완료 후 스스로 풀리는지(`await value` 뒤 nil)를 이 핸들로
+    /// 확인한다(`ManualSwitchReentrancyTests`).
+    var manualSwitchTaskForTesting: Task<Void, Never>? { manualSwitchTask }
 
     /// 테스트 전용 — 외부 Mobius.app 감시 타이머. 엔진이 내려간 동안에도 **이것만은** 살아
     /// 있어야 자동 재개가 성립한다(없으면 사용자가 앱을 재시작해야 복구된다).
@@ -1789,6 +1815,16 @@ final class AccountsState: ObservableObject {
         // 하기 때문이다: 어차피 전환하지 못할 계정의 토큰을 굳이 돌려 놓을 이유가 없다.
         // (UI 는 막힌 동안 카드를 비활성화하므로 평소엔 여기 닿지 않는다 — `AccountsView`.)
         guard !externalAppBlocksSwitching() else { return }
+        // 재진입 가드 — 두 계정을 빠르게 연속 클릭하면 독립된 두 전환이 경합해 나중에 끝난
+        // 쪽이 이긴다(사용자가 마지막에 누른 계정과 최종 활성이 달라질 수 있었다). 아래 모든
+        // 분기(동기 즉시 전환 포함)보다 **먼저** 막아야 한다 — 진행 중인 분기가 `await` 에서
+        // 잠깐 양보하는 사이 다른 분기가 동기로 끝까지 돌면, 나중에 깨어난 진행 중인 분기가
+        // 그 결과를 덮어쓸 수 있기 때문이다. `desktopSwitchTask` 와 같은 패턴 — 조용히
+        // 무시하지 않고 배너로 알린다(무반응은 그 자체로 고장처럼 보인다).
+        guard manualSwitchTask == nil else {
+            lastError = l.accountsErrorSwitchBusy
+            return
+        }
         guard let provider = store.file.accounts.first(where: { $0.id == id })?.provider else { return }
         let alreadyFlagged = store.file.accounts.first { $0.id == id }?.needsReauth ?? false
         // Codex는 OAuth refresh 검증 경로가 없고, 이미 재로그인 필요로 마킹된 계정은 사용자가
@@ -1797,9 +1833,10 @@ final class AccountsState: ObservableObject {
             if provider == .codex {
                 // 낙관적 표시 + ①a fresh-read 가드 강화(전환 대상 계정의 게이지 refresh를 스킵시킴).
                 pendingSwitchID = id
-                Task { @MainActor in
-                    defer { pendingSwitchID = nil }
+                manualSwitchTask = Task { @MainActor in
+                    defer { pendingSwitchID = nil; manualSwitchTask = nil }
                     await quiesceCodexUsageTask()
+                    guard !Task.isCancelled else { return } // stop()/가드가 끊음 — 전환하지 않는다
                     performSwitch(to: id)
                 }
             } else {
@@ -1810,9 +1847,10 @@ final class AccountsState: ObservableObject {
         // 낙관적 표시: 클릭 즉시 이 계정을 활성으로 보여줘 UI가 스무스하게 전환된 것처럼 보이게 한다.
         // 실제 refresh(대상이 아직 폴백일 때 — 안전) + 자격증명 스왑은 백그라운드에서.
         pendingSwitchID = id
-        Task { @MainActor in
-            defer { pendingSwitchID = nil }   // 완료되면 실제 activeAccountID가 표시를 인계
+        manualSwitchTask = Task { @MainActor in
+            defer { pendingSwitchID = nil; manualSwitchTask = nil }   // 완료되면 실제 activeAccountID가 표시를 인계
             guard await preflightFallback(id, now: Date()) else { reload(); return } // 죽음 → 취소(마킹됨)
+            guard !Task.isCancelled else { return } // stop()/가드가 끊음 — 전환하지 않는다
             performSwitch(to: id)
         }
     }
@@ -1971,6 +2009,10 @@ final class AccountsState: ObservableObject {
     }
 
     private var loginFlow: LoginFlowController?
+    /// `addAccount()` 의 진행 중 태스크 — `stop()` 취소 대상(부류 스윕 대상 필드).
+    /// 재진입 방지는 여전히 `loginFlow`(위)가 맡는다: 이 태스크가 시작하기 **전**(동기)에
+    /// 세팅되므로 `loginFlow == nil` 가드가 항상 먼저 걸린다.
+    private var addAccountTask: Task<Void, Never>?
 
     /// 테스트 전용 — 로그인 플로우가 떴는지. 이중 writer 가드가 계정 **추가**까지 막는지는
     /// 이것으로만 확인할 수 있다(막지 못하면 `claude auth login` 이 실제로 실행된다).
@@ -1984,7 +2026,8 @@ final class AccountsState: ObservableObject {
         guard loginFlow == nil else { return } // 진행 중이면 중복 실행 방지
         let flow = LoginFlowController(io: io, store: store, switcher: switcher)
         loginFlow = flow
-        Task { @MainActor in
+        addAccountTask = Task { @MainActor in
+            defer { addAccountTask = nil }
             // 계정 추가는 `claude auth login`으로 동작 — CLI가 없으면 설정에서 설치하도록 안내.
             // 탐색은 대화형 로그인 셸을 띄울 수 있어(초 단위) **메인에서 기다리지 않는다** —
             // 여기서 동기로 부르면 버튼을 누른 순간 팝오버가 통째로 멈춘다.
@@ -2010,6 +2053,14 @@ final class AccountsState: ObservableObject {
                 // 계정 추가는 CLI 계정만 추가한다. Desktop 연결은 사용자가 카드 메뉴에서
                 // 필요할 때 직접 한다 (계정 추가 흐름에 끼워넣으면 저장 계정이 뒤섞였음).
                 return
+            } catch is CancellationError {
+                // stop()/이중 writer 가드가 진행 중인 로그인을 끊었다 — 사용자 실패가 아니라
+                // 엔진이 물러난 것이므로 에러 배너·알림을 띄우지 않는다.
+                // `LoginFlowController.run()`의 `defer { cleanup() }`이 이미 PTY 프로세스·
+                // 인증창·임시파일을 정리했다(타임아웃/사용자취소와 같은 경로). 드물게 CLI가
+                // 우리가 감지하기 전에 이미 로그인을 끝냈다면, 그 계정은 미등록인 채 라이브에만
+                // 남는다 — `stopEngine()` 문서에 적었듯 다음 `tick()`의
+                // `adoptLiveAccountIfUnregistered()`가 엔진 재개 시 자동으로 흡수한다.
             } catch {
                 let message = l.accountsErrorMessage(error)
                 lastError = message
@@ -2062,6 +2113,12 @@ final class AccountsState: ObservableObject {
         }
     }
 
+    /// `endDesktopCapture()` 의 복원 태스크(종료→stash 복원→재실행) — 부류 스윕 대상 필드.
+    /// **일부러 취소하지 않는다**(아래 `deliberatelyNotCancelled` 참조): 시작 시점에
+    /// `desktopCaptureStash` 를 이미 nil 로 비웠으므로, 이 태스크 자체가 그 스택을 되돌릴
+    /// 유일한 경로다 — 끊으면 Desktop 이 로그아웃된 채 남고 되돌릴 방법이 없어진다.
+    private var desktopCaptureRestoreTask: Task<Void, Never>?
+
     /// 시트 닫기/취소 — 감시 태스크 정리 + 강제 로그아웃했던 원래 세션 복원.
     func endDesktopCapture() {
         desktopCaptureTask?.cancel()
@@ -2070,7 +2127,8 @@ final class AccountsState: ObservableObject {
         guard let stash = desktopCaptureStash else { return }
         desktopCaptureStash = nil
         // 취소: 치워둔 원래 Desktop 로그인을 되돌린다 (종료 → 복원 → 재실행)
-        Task { @MainActor in
+        desktopCaptureRestoreTask = Task { @MainActor in
+            defer { desktopCaptureRestoreTask = nil }
             await desktopCoordinator.terminateAndWait()
             try? desktopSwitcher.restoreStashedIdentity(from: stash)
             if await !desktopCoordinator.launch() {

@@ -42,7 +42,11 @@ struct AccountsView: View {
             // 막힌 동안에는 전환도 계정 추가도 전부 거절된다(`AccountsState` 의 공통 관문).
             // 컨트롤을 멀쩡히 살려 두면 눌러도 아무 일이 없어 그 자체가 고장으로 읽히므로,
             // 위 안내와 함께 비활성으로 보여 준다 — 카드 내용은 그대로 읽을 수 있다.
-            .disabled(state.blockedByExternalApp)
+            // `pendingSwitchID` 도 같은 이유로 더한다 — 전환이 끝나기 전에 다른 카드를 눌러도
+            // `AccountsState` 가 배너로 거절하지만(재진입 가드), 클릭 자체를 막아 두면 "눌렀는데
+            // 아무 일도 안 일어남" 대신 카드가 비활성으로 보여 더 분명하다. 전환은 짧게 끝나므로
+            // 그 사이 계정 추가 등 다른 컨트롤까지 같이 쉬어도 체감상 무해하다.
+            .disabled(state.blockedByExternalApp || state.pendingSwitchID != nil)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onReceive(clock) { now = $0 }
