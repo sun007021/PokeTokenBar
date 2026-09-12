@@ -4,6 +4,7 @@ read_when:
   - 버전을 배포할 때 (자연어 트리거 포함: "배포해줘", "릴리스 올려줘", "패치 배포")
   - release.sh 가 문서·에셋 경고나 하드 게이트로 중단됐을 때
   - UI 를 바꿔 스크린샷·랜딩을 갱신해야 할 때
+  - mobius 포크(`FORK_BUILD` 가 있는 체크아웃)를 배포할 때 — §포크 릴리스
 ---
 
 # 릴리스 실행 절차
@@ -50,3 +51,66 @@ PTB_NOTES_FILE=/tmp/ptb-notes.md ./scripts/release.sh <version>
 ## 3. 검증
 
 완료 후 `brew upgrade --cask poke-token-bar` 로 실제 업그레이드 동작을 확인한다.
+
+## 포크 릴리스 (mobius — `FORK_BUILD` 가 있는 체크아웃)
+
+위 1~3 절은 **상류**(`chattymin/PokeTokenBar`) 기준이다. 이 포크는 표면이 다르므로
+`release.sh` 가 `scripts/build-app.sh` 의 `FORK_BUILD=` 를 보고 **다른 경로**로 갈라진다.
+(`docs/reference/mobius-integration.md` §`release.sh` 는 이 포크에서 돌지 않는다 는 이 경로가
+생기기 전 기록이다 — 지금은 돈다.)
+
+```bash
+# 평소 포크 릴리스: FORK_BUILD 만 +1  (2.5.3+mobius.1 → 2.5.3+mobius.2)
+CODESIGN_IDENTITY="Developer ID Application: … (TEAMID)" \
+  PTB_NOTES_FILE=/tmp/notes.md ./scripts/release.sh
+
+# 상류 rebase 로 기준점이 올라갔을 때: UPSTREAM_VERSION 갱신 + FORK_BUILD=1
+CODESIGN_IDENTITY="…" ./scripts/release.sh --upstream 2.5.4
+```
+
+검토만: `./scripts/release.sh --check-only` (포크에서는 포크용 체크리스트가 나온다).
+
+### 상류와 무엇이 다른가
+
+| 단계 | 상류 | 포크 | 왜 |
+|---|---|---|---|
+| 브랜치 | `main` | `mobius-integration` (`PTB_RELEASE_BRANCH`) | 포크 작업 브랜치 |
+| 배포 대상 | `chattymin/PokeTokenBar` | `origin` 에서 파생 (`PTB_RELEASE_REPO`) | 하드코딩이면 권한 없는 상류에 쏜다 |
+| 버전 | `VERSION="x.y.z"` 한 줄 | `UPSTREAM_VERSION`+`FORK_BUILD` 두 변수 | §버전 표기 — 평평한 리터럴로 덮으면 포크 표기가 사라진다 |
+| 태그 | `vX.Y.Z` | `vX.Y.Z+mobius.N` | 번들의 `CFBundleShortVersionString` 과 **같은 문자열**. `+` 는 git ref 로 유효함을 확인했다(`git check-ref-format`, 실제 태그 생성·`rev-parse`·`describe` 왕복) |
+| 문서 게이트 | README·assets·랜딩·cask | `mobius-integration.md` 하나 | 상류 표면은 이 포크가 유지하지 않는다(§상류 rebase: "README*.md 는 상류 파일") |
+| Homebrew cask | 버전 갱신 | **단계 없음** | 이 포크엔 tap 이 없고, cask 자체가 금지다 — 같은 번들 ID·같은 경로라 `brew upgrade` 가 포크를 상류 빌드로 덮는다 |
+| 랜딩/Pages | 재빌드 요청 | 없음 | 포크는 랜딩을 유지하지 않는다 |
+| 작업트리 | 검사 없음 | **깨끗해야 시작** | 범프 커밋에 관계없는 스테이징이 딸려 들어가는 것 방지 |
+
+### 서명·공증 — 자산은 로컬에서만 만든다
+
+릴리스 자산은 **이 머신에서** 만든다. CI 러너에는 인증서가 없어 ad-hoc 서명밖에 못 하는데,
+ad-hoc 은 **리빌드마다 코드 정체성이 바뀌어** 사용자 Keychain 의 "항상 허용"을 매번 리셋한다 —
+계정 전환 기능이 Keychain 을 쓰므로 고정 서명이 사실상 필수다. `release.sh` 의 서명 게이트와
+`PTB_REQUIRE_STABLE_SIGN=1` 이 ad-hoc 폴백을 막는다.
+
+★ **Developer ID 서명이어도 공증(notarization)은 안 돼 있다.** 로컬 `cp -R` 설치는 quarantine 이
+안 붙어 문제가 없지만(§빌드·설치), **릴리스 zip 은 다운로드되므로 quarantine 이 붙고 Gatekeeper 가
+막는다.** 그래서 `release.sh` 가 릴리스 노트 맨 앞에 `xattr -d com.apple.quarantine` 안내를
+**자동으로** 붙인다 — 사람이 기억할 일로 남기지 않는다.
+
+### CI (`.github/workflows/release.yml`)
+
+태그(`v*`) push 에 붙는 **검증 전용** 워크플로다: 릴리스 구성 빌드 + `test-gate.sh` +
+"태그가 `build-app.sh` 의 버전과 일치하는가". 자산은 만들지도 올리지도 않는다(위 서명 이유).
+`build-app.sh` 는 마지막에 `pkill` 하고 `/Applications` 를 교체하는 **설치 스크립트**라
+CI 에서 돌리지 않는다.
+
+- `workflow_dispatch` 는 워크플로 파일이 **저장소 기본 브랜치**에 있어야 UI 에 뜬다.
+  기본 브랜치가 `main` 인 동안에는 태그 트리거만 동작한다(태그 트리거는 태그가 가리키는
+  커밋의 워크플로를 쓰므로 기본 브랜치와 무관하다).
+- `ci.yml` 은 `main` 브랜치/PR 에만 붙어 있어 `mobius-integration` push 에는 **안 돈다.**
+  포크 작업 중 상시 CI 가 필요하면 그 트리거를 넓혀야 한다(상류 공유 파일이라 rebase 충돌
+  면적이 늘어나는 것과 맞바꾼다).
+
+### 배포 후
+
+인앱 업데이트 배너는 **상류** `releases/latest` 를 본다(`UpdateChecker.repo =
+chattymin/PokeTokenBar`, 의도된 결정). 즉 **포크 릴리스는 배너로 전달되지 않는다** —
+자신이 릴리스 페이지에서 받거나 소스에서 다시 빌드하는 것이 유일한 갱신 경로다.
