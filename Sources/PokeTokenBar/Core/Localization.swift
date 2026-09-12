@@ -1131,21 +1131,273 @@ struct L {
     var accountsSettingsThreshold: String { t("전환 기준", "Threshold", "切り替え基準", "Umbral", "Seuil", "Limiar", "Schwellenwert") }
 
     // MARK: 이중 writer 가드 (기존 Mobius.app 실행 감지)
-    // ko·en 만 번역하고 나머지 5개 슬롯에는 en 을 넣는다 — 계정 전환 기능 한정 규칙
+    // ko·en 만 번역하고 나머지 5개 슬롯에는 en 을 넣는다(`koEn`) — 계정 전환 기능 한정 규칙
     // (`docs/reference/mobius-integration.md` §다국어 규칙). 이 두 문장은 **기능이 멈춘 이유**를
     // 말한다. 없으면 사용자에게는 그냥 카드가 안 눌리는 고장으로 보인다.
 
     var accountsExternalAppTitle: String {
-        let en = "Mobius.app is running"
-        return t("Mobius 앱이 실행 중이에요", en, en, en, en, en, en)
+        koEn("Mobius 앱이 실행 중이에요", "Mobius.app is running")
     }
     /// 왜 멈췄는지 + 어떻게 되돌리는지. "앱을 다시 켜세요"라고 하지 않는 것이 중요하다 —
     /// Mobius 앱을 종료하면 이 앱이 스스로 재개한다.
     var accountsExternalAppBody: String {
-        let en = "Two apps swapping the same sign-in can corrupt it, so switching is paused. "
-            + "Quit Mobius.app and it resumes on its own."
-        return t("두 앱이 같은 로그인 정보를 동시에 바꾸면 계정이 망가질 수 있어 전환을 멈췄어요. "
-                 + "Mobius 앱을 종료하면 저절로 다시 시작돼요.",
-                 en, en, en, en, en, en)
+        koEn("두 앱이 같은 로그인 정보를 동시에 바꾸면 계정이 망가질 수 있어 전환을 멈췄어요. "
+             + "Mobius 앱을 종료하면 저절로 다시 시작돼요.",
+             "Two apps swapping the same sign-in can corrupt it, so switching is paused. "
+             + "Quit Mobius.app and it resumes on its own.")
+    }
+
+    // MARK: 계정 전환 — 알림·에러 문구
+    // 이 두 묶음은 카드·설정 라벨(`accounts*`)과 성격이 다르다: 폭 제약이 없고 문장으로 읽히며,
+    // 같은 사건이라도 배지 문구와 알림 문구가 따로 움직인다. 그래서 접두사를 나눈다 —
+    // 알림은 `accountsNotify*`, 배너·실패 사유는 `accountsError*`.
+    // ko·en 만 쓰고 나머지 5개 슬롯에는 en 을 넣는다(`koEn`).
+
+    /// 계정 전환 기능 한정 — ko·en 만 제대로 쓰고 ja/es/fr/pt/de 슬롯에는 en 을 그대로 넣는다
+    /// (`docs/reference/mobius-integration.md` §다국어 규칙, 사용자 결정 2026-09-12).
+    /// **기존 항목에는 적용하지 않는다** — 이미 7개 언어가 든 문자열을 되돌리는 건 순수한 손실이다.
+    private func koEn(_ ko: String, _ en: String) -> String { t(ko, en, en, en, en, en, en) }
+
+    // MARK: — 알림 (UNUserNotification)
+
+    /// 확정이 아니라 의심 단계다 — 배지(`accountsAuthSuspectBadge`)와 같은 사건이지만 문구를
+    /// 공유하지 않는다. 배지는 캡슐 폭에 맞춘 최단 표기라 알림 제목으로 다듬을 여지가 없고,
+    /// 공유하면 폭 조정이 알림까지 바꾼다.
+    var accountsNotifyAuthSuspectTitle: String { koEn("인증 확인 필요", "Check your sign-in") }
+    func accountsNotifyAuthSuspectBody(_ name: String) -> String {
+        koEn("\(name) 계정의 세션이 도는데 로그인이 만료된 채예요. 카드의 '다시 로그인'을 눌러주세요.",
+             "\(name) has a session running, but its sign-in has expired. Tap “Sign in again” on the card.")
+    }
+    var accountsNotifyReauthTitle: String { koEn("재로그인 필요", "Sign in again") }
+    /// 네트워크 refresh 가 폐기를 확인한 경로. 아래 `accountsNotifySignInExpiredBody` 와 뜻이
+    /// 같지만 상류가 두 문장('인증' / '로그인')을 따로 썼고 그대로 옮겼다 — en 은 한 문장으로
+    /// 모인다. 둘을 합치려면 ko 카피를 바꾸는 결정이 필요하다.
+    func accountsNotifyReauthBody(_ name: String) -> String {
+        koEn("\(name) 계정의 인증이 만료됐어요. 카드의 '다시 로그인'을 눌러주세요.",
+             "\(name)’s sign-in has expired. Tap “Sign in again” on the card.")
+    }
+    /// 로컬 검사(빈/시간만료 refresh 토큰)가 잡은 경로 — 위 주석 참조.
+    func accountsNotifySignInExpiredBody(_ name: String) -> String {
+        koEn("\(name) 계정의 로그인이 만료됐어요. 카드의 '다시 로그인'을 눌러주세요.",
+             "\(name)’s sign-in has expired. Tap “Sign in again” on the card.")
+    }
+    func accountsNotifySwitchSkippedBody(_ name: String) -> String {
+        koEn("\(name) 계정의 로그인이 만료돼 전환을 건너뛰었어요. '다시 로그인'을 눌러주세요.",
+             "Skipped switching to \(name) because its sign-in has expired. Tap “Sign in again” to fix it.")
+    }
+    func accountsNotifyExternalChangeTitle(_ provider: String) -> String {
+        koEn("\(provider) 활성 계정이 밖에서 바뀌었어요",
+             "\(provider)’s active account changed outside the app")
+    }
+    func accountsNotifyExternalChangeBody(_ name: String) -> String {
+        koEn("외부 로그인 또는 실행 중 세션의 갱신으로 활성 계정이 \(name)(으)로 바뀌었습니다. 카드를 눌러 되돌릴 수 있어요.",
+             "An outside sign-in — or a token refresh from a running session — made \(name) the active account. Tap its card to switch back.")
+    }
+    func accountsNotifyAllExhaustedTitle(_ provider: String) -> String {
+        koEn("\(provider) 모든 계정 한도 소진", "Every \(provider) account is out of quota")
+    }
+    var accountsNotifyAllExhaustedBody: String {
+        koEn("전환 가능한 계정이 없습니다. 리셋을 기다려주세요.",
+             "There’s no account left to switch to — wait for a reset.")
+    }
+    /// 소진이 아니라 "곧 참" — 자동 전환이 꺼진 풀에서만 온다. 소진 표현을 섞으면 거짓말이 된다.
+    func accountsNotifyAdvisoryTitle(_ name: String) -> String {
+        koEn("⚠️ \(name) 계정 한도가 가까워요", "⚠️ \(name) is close to its limit")
+    }
+    func accountsNotifyAdvisoryBody(_ name: String) -> String {
+        koEn("\(name) 계정이 설정한 임계값에 도달했어요. 자동 전환이 꺼져 있으니 필요하면 직접 전환하세요.",
+             "\(name) reached the threshold you set. Auto-switching is off, so switch by hand if you need to.")
+    }
+    var accountsNotifyExhaustedManualTitle: String {
+        koEn("한도 소진 — 자동 전환이 꺼져 있습니다", "Limit reached — auto-switching is off")
+    }
+    func accountsNotifyExhaustedManualBody(_ name: String) -> String {
+        koEn("\(name) 계정이 한도에 도달했습니다. 수동으로 전환하세요.",
+             "\(name) hit its limit. Switch to another account by hand.")
+    }
+    /// ★ 계정 한도와 문구를 섞지 않는다 — 계정은 다른 모델로 멀쩡히 쓸 수 있다.
+    var accountsNotifyModelLimitedManualTitle: String {
+        koEn("모델 한도 — 자동 전환이 꺼져 있습니다", "Model limit — auto-switching is off")
+    }
+    func accountsNotifyModelLimitedManualBody(_ name: String) -> String {
+        koEn("\(name) 계정에서 이 모델만 한도에 걸렸어요. 계정은 다른 모델로 계속 쓸 수 있어요.",
+             "Only this model is capped on \(name) — the account still works with other models.")
+    }
+    /// 전환 알림 셋이 공유하는 꼬리 문장. 두 프로바이더의 전제가 정반대라 한 문구로 합치지 말 것:
+    /// 실행 중인 claude 세션은 턴마다 자격증명을 다시 읽지만, codex 세션은 시작 시점 토큰을 계속 쓴다.
+    var accountsNotifySessionNoteClaude: String {
+        koEn("실행 중인 세션도 다음 입력부터 새 계정으로 이어져요.",
+             "Sessions already running pick up the new account on their next turn.")
+    }
+    var accountsNotifySessionNoteCodex: String {
+        koEn("실행 중인 codex 세션은 종료해야 새 계정이 적용돼요.",
+             "Quit any running codex session for the new account to take effect.")
+    }
+    func accountsNotifyPrimaryRecoveredTitle(_ name: String) -> String {
+        koEn("✅ \(name) 계정으로 복귀했어요", "✅ Back on \(name)")
+    }
+    func accountsNotifyPrimaryRecoveredBody(note: String) -> String {
+        koEn("한도가 초기화돼 주 계정으로 돌아왔어요. \(note)",
+             "The limit reset, so you’re back on your primary account. \(note)")
+    }
+    func accountsNotifyAdvisorySwitchTitle(_ name: String) -> String {
+        koEn("🔄 \(name) 계정으로 미리 전환했어요", "🔄 Switched early to \(name)")
+    }
+    func accountsNotifyAdvisorySwitchBody(from: String, to: String, note: String) -> String {
+        koEn("\(from) 계정이 한도에 가까워져 여유 있는 \(to)(으)로 미리 전환했어요. \(note)",
+             "\(from) was nearing its limit, so the switch went to \(to), which still has room. \(note)")
+    }
+    func accountsNotifySwitchedTitle(_ name: String) -> String {
+        koEn("🔄 \(name) 계정으로 전환했어요", "🔄 Switched to \(name)")
+    }
+    func accountsNotifySwitchedBody(from: String, to: String, note: String) -> String {
+        koEn("\(from) 한도 소진 → \(to). \(note)",
+             "\(from) is out of quota → \(to). \(note)")
+    }
+    func accountsNotifyModelSwitchedBody(from: String, to: String, note: String) -> String {
+        koEn("\(from) 계정에서 이 모델의 한도에 걸려 \(to)(으)로 옮겼어요. \(note)",
+             "\(from) hit this model’s limit, so the switch went to \(to). \(note)")
+    }
+    var accountsNotifyDesktopLinkedTitle: String {
+        koEn("Claude Desktop 자동 연결됨", "Claude Desktop linked")
+    }
+    func accountsNotifyDesktopLinkedBody(_ name: String) -> String {
+        koEn("\(name) 계정의 Desktop 세션을 저장했어요. 이제 전환하면 자동으로 이어집니다.",
+             "Saved \(name)’s Desktop session — switching accounts now carries Desktop along.")
+    }
+    var accountsNotifyClaudeCLINeededTitle: String {
+        koEn("Claude Code CLI 필요", "Claude Code CLI required")
+    }
+    /// ★ 상류(Mobius) 카피를 그대로 옮긴 것이라 **이 앱에 없는 설정 화면**('설치 현황')을 가리킨다.
+    /// PokeTokenBar 의 설정에는 그 섹션이 없다 — 카피 수정은 별도 결정으로 남긴다.
+    var accountsNotifyClaudeCLINeededBody: String {
+        koEn("계정을 추가하려면 먼저 Claude Code CLI를 설치하세요. 설정 → 설치 현황에서 설치할 수 있어요.",
+             "Install the Claude Code CLI before adding an account. You can install it from Settings → Installed tools.")
+    }
+    var accountsNotifyAccountAddedTitle: String { koEn("계정 추가 완료", "Account added") }
+    var accountsNotifyAccountRefreshedTitle: String {
+        koEn("기존 계정 자격증명 갱신됨", "Credentials refreshed")
+    }
+    var accountsNotifyAddFailedTitle: String { koEn("계정 추가 실패", "Couldn’t add the account") }
+    var accountsNotifyDesktopSnapshotSavedTitle: String {
+        koEn("Desktop 스냅샷 저장", "Desktop snapshot saved")
+    }
+    func accountsNotifyDesktopSnapshotSavedBody(_ name: String) -> String {
+        koEn("\(name) 전환 시 Claude Desktop도 함께 전환됩니다.",
+             "Switching to \(name) now switches Claude Desktop too.")
+    }
+
+    // MARK: — 배너·실패 사유 (AccountsState.lastError / 캡처 시트)
+
+    func accountsErrorLoadFailed(_ detail: String) -> String {
+        koEn("계정 목록 로드 실패: \(detail)", "Couldn’t load the account list: \(detail)")
+    }
+    func accountsErrorProviderHealed(_ names: String) -> String {
+        koEn("구버전이 저장한 계정 목록에서 프로바이더 정보가 소실돼 복구했습니다: \(names)",
+             "An older version dropped the provider on these accounts, so they were restored: \(names)")
+    }
+    var accountsErrorSyncStalled: String {
+        koEn("활성 계정 동기화가 계속 실패하고 있어요 — 자동 전환·배지가 잠시 지연될 수 있어요.",
+             "Syncing the active account keeps failing — auto-switching and badges may lag for a while.")
+    }
+    func accountsErrorAutoSwitchFailed(_ detail: String) -> String {
+        koEn("자동 전환 실패: \(detail)", "Auto-switch failed: \(detail)")
+    }
+    func accountsErrorSwitchFailed(_ detail: String) -> String {
+        koEn("전환 실패: \(detail)", "Switch failed: \(detail)")
+    }
+    func accountsErrorSetPrimaryFailed(_ detail: String) -> String {
+        koEn("Primary 변경 실패: \(detail)", "Couldn’t change the primary account: \(detail)")
+    }
+    var accountsErrorClaudeCLIMissing: String {
+        koEn("Claude Code CLI가 필요합니다 — 설정에서 설치하세요.",
+             "The Claude Code CLI is required — install it from Settings.")
+    }
+    var accountsErrorDesktopSwitchBusy: String {
+        koEn("Desktop 전환이 진행 중입니다 — 이번 전환에서는 Desktop을 건너뜁니다.",
+             "A Desktop switch is still running — skipping Desktop this time.")
+    }
+    func accountsErrorDesktopSwitchFailed(_ detail: String) -> String {
+        koEn("Desktop 전환 실패(CLI는 전환됨): \(detail)",
+             "Desktop switch failed (the CLI did switch): \(detail)")
+    }
+    func accountsErrorDesktopAutoCaptureFailed(_ detail: String) -> String {
+        koEn("Desktop 자동 캡처 실패: \(detail)", "Desktop auto-capture failed: \(detail)")
+    }
+    var accountsErrorDesktopNeedsActive: String {
+        koEn("먼저 이 계정으로 전환한 뒤 Claude Desktop을 연결하세요.",
+             "Switch to this account first, then link Claude Desktop.")
+    }
+    var accountsErrorDesktopNotInstalled: String {
+        koEn("Claude Desktop이 설치되어 있지 않습니다.", "Claude Desktop isn’t installed.")
+    }
+    var accountsErrorDesktopRelaunchManual: String {
+        koEn("Claude Desktop 재실행 실패 — 업데이트 적용 중일 수 있어요. 잠시 후 수동으로 실행해주세요.",
+             "Couldn’t relaunch Claude Desktop — an update may be installing. Open it yourself in a moment.")
+    }
+    var accountsErrorDesktopRelaunchRetry: String {
+        koEn("Claude Desktop 재실행 실패 — 업데이트 적용 중일 수 있어요. 잠시 후 다시 시도해주세요.",
+             "Couldn’t relaunch Claude Desktop — an update may be installing. Try again in a moment.")
+    }
+    func accountsErrorDesktopLogoutFailed(_ detail: String) -> String {
+        koEn("Desktop 로그아웃 실패: \(detail)", "Desktop sign-out failed: \(detail)")
+    }
+    var accountsErrorDesktopLogoutStuck: String {
+        koEn("Claude Desktop 로그아웃에 실패했어요. 잠시 후 다시 시도하거나, Desktop을 완전히 종료한 뒤 다시 연결해주세요.",
+             "Couldn’t sign out of Claude Desktop. Try again in a moment, or quit Desktop completely and link it again.")
+    }
+    var accountsErrorDesktopLoginTimeout: String {
+        koEn("5분 안에 로그인이 감지되지 않았습니다. 다시 시도해주세요.",
+             "No sign-in was detected within 5 minutes. Try again.")
+    }
+    var accountsErrorDesktopLoginNotDetected: String {
+        koEn("아직 로그인이 감지되지 않았어요. Claude Desktop에서 로그인을 마친 뒤 다시 저장을 눌러주세요.",
+             "No sign-in detected yet. Finish signing in to Claude Desktop, then press Save again.")
+    }
+    func accountsErrorDesktopSaveFailed(_ detail: String) -> String {
+        koEn("저장 실패: \(detail)", "Save failed: \(detail)")
+    }
+
+    // MARK: — 에러 타입 → 사용자 문구
+    // `importErrorMessage` 와 같은 이유로 뷰가 아니라 여기 둔다: `LoginFlowError` /
+    // `DesktopCoordinatorError` 는 더 이상 `LocalizedError` 가 아니라서(문구에 언어가 필요한데
+    // `errorDescription` 은 아무것도 받지 못한다) 이 매핑이 빠지면 "The operation couldn't be
+    // completed…" 라는 원문이 그대로 노출된다 — 조용한 품질 저하라 테스트로 고정한다.
+
+    func accountsErrorMessage(_ error: Error) -> String {
+        switch error {
+        case LoginFlowError.claudeNotFound: return accountsErrorClaudeCLINotFound
+        case LoginFlowError.urlNotFound:    return accountsErrorLoginURLNotFound
+        case LoginFlowError.timeout:        return accountsErrorLoginTimeout
+        case LoginFlowError.canceled:       return accountsErrorLoginCanceled
+        case DesktopCoordinatorError.switchInProgress: return accountsErrorDesktopSwitchInProgress
+        default: return error.localizedDescription
+        }
+    }
+    /// ★ 상류 카피 그대로 — `mobius` CLI 는 **이 앱에 없다**(Mobius.app 전용 명령이었다).
+    /// 카피 수정은 별도 결정으로 남긴다.
+    var accountsErrorClaudeCLINotFound: String {
+        koEn("claude CLI를 찾지 못했어요. 설치를 확인하거나, 터미널에서 `claude auth login`으로 로그인한 뒤 `mobius capture <이름>`으로 계정을 등록하세요.",
+             "Couldn’t find the claude CLI. Check that it’s installed, or sign in with `claude auth login` in a terminal and register the account with `mobius capture <name>`.")
+    }
+    /// ★ 위와 같은 상류 카피 주의 사항.
+    var accountsErrorLoginURLNotFound: String {
+        koEn("로그인 URL을 얻지 못했습니다. 터미널에서 `claude auth login`으로 로그인한 뒤 `mobius capture <이름>`으로 계정을 등록하세요.",
+             "Couldn’t get a sign-in URL. Sign in with `claude auth login` in a terminal, then register the account with `mobius capture <name>`.")
+    }
+    var accountsErrorLoginTimeout: String {
+        koEn("로그인 대기 시간이 초과되었습니다. 다시 시도해주세요.", "The sign-in timed out. Try again.")
+    }
+    var accountsErrorLoginCanceled: String {
+        koEn("로그인이 취소되었습니다.", "Sign-in was canceled.")
+    }
+    var accountsErrorDesktopSwitchInProgress: String {
+        koEn("이전 Desktop 전환이 아직 진행 중입니다.", "The previous Desktop switch is still running.")
+    }
+    var accountsErrorInstallLaunchFailed: String {
+        koEn("설치 프로세스를 시작하지 못했습니다.", "Couldn’t start the installer.")
+    }
+    func accountsErrorInstallFailed(code: Int32, detail: String) -> String {
+        koEn("설치 실패 (코드 \(code)). \(detail)", "Install failed (code \(code)). \(detail)")
     }
 }

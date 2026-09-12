@@ -17,14 +17,16 @@ enum ClaudeCLI {
 
     /// 공식 네이티브 설치 스크립트로 설치 (node 불필요, ~/.local/bin/claude에 설치).
     /// 성공 시 nil, 실패 시 에러 메시지.
-    static func install() async -> String? {
+    /// - Parameter l: 실패 문구용 현지화. 이 계층은 뷰가 아니라 `companion.l` 에 닿지 못하므로
+    ///   호출부(뷰 또는 `AccountsState`)가 자기 `L` 을 넘긴다.
+    static func install(_ l: L) async -> String? {
         // 설치 스크립트는 홈 아래에 쓰므로 관리자 권한 불필요.
         let script = "curl -fsSL https://claude.ai/install.sh | bash"
         guard let (code, output) = await ToolInventory.runLoginShellAsync(script) else {
-            return loc("설치 프로세스를 시작하지 못했습니다.")
+            return l.accountsErrorInstallLaunchFailed
         }
         if code == 0, isInstalled { return nil }
         let tail = output.split(separator: "\n").suffix(3).joined(separator: " ")
-        return loc("설치 실패 (코드 %d). %@", code, tail)
+        return l.accountsErrorInstallFailed(code: code, detail: tail)
     }
 }

@@ -161,10 +161,19 @@ final class AccountsState: ObservableObject {
         if !notifiedSuspects.contains(active.id) {
             notifiedSuspects.insert(active.id)
             saveNotifiedSuspects()
-            notify(title: loc("인증 확인 필요"),
-                   body: loc("%@ 계정의 세션이 도는데 로그인이 만료된 채예요. 카드의 '다시 로그인'을 눌러주세요.", active.nickname))
+            notify(title: l.accountsNotifyAuthSuspectTitle,
+                   body: l.accountsNotifyAuthSuspectBody(active.nickname))
         }
     }
+
+    /// 앱 언어 미러 — 알림·에러 문구를 만드는 자리가 뷰가 아니라서 `companion.l` 에 닿지
+    /// 못한다. 단일 소스는 `CompanionStore.language` 이고, `UsageStore.localizationLanguage`
+    /// 와 **같은 관례**로 기동 시 1회 시드 + 언어 설정 변경 시 갱신한다
+    /// (`AppDelegate.applicationDidFinishLaunching`, `SettingsView` 의 언어 픽커).
+    /// 재시드 전 기본값은 시스템 언어라 실행 순서와 무관하게 안전하다.
+    var localizationLanguage: AppLanguage = .systemDefault
+    /// 뷰의 `companion.l` 에 대응하는 이 계층의 접근자.
+    private var l: L { L(localizationLanguage) }
 
     let env: MobiusEnvironment
     let store: AccountStore
@@ -296,6 +305,12 @@ final class AccountsState: ObservableObject {
          externalMobiusRunning: @escaping @MainActor () -> Bool
             = MobiusCoexistence.isExternalMobiusRunning) {
         let kc = keychain
+        // init 은 `self.localizationLanguage` 를 읽을 수 없고(아직 초기화 전), 시드하는
+        // `AppDelegate` 도 아직 `CompanionStore` 를 만들지 않았다 — 미러의 기본값과 같은
+        // 시스템 언어로 렌더한다. 여기서 만들어지는 두 문구(로드 실패·프로바이더 복구)는
+        // 손상된 accounts.json 에서만 나오고, 사용자가 앱 언어를 시스템과 다르게 고른
+        // 경우에만 어긋난다 — `UsageStore.localizationLanguage` 가 감수한 것과 같은 틈이다.
+        let l = L(.systemDefault)
         self.externalMobiusRunning = externalMobiusRunning
         self.env = env
         // 초기화 실패(accounts.json 손상 등)는 빈 스토어로 시작하고 에러 표시
@@ -305,7 +320,7 @@ final class AccountsState: ObservableObject {
             store = try AccountStore(env: env, keychain: kc)
         } catch {
             store = AccountStore(env: env, keychain: kc, file: AccountsFile())
-            initError = loc("계정 목록 로드 실패: %@", error.localizedDescription)
+            initError = l.accountsErrorLoadFailed(error.localizedDescription)
         }
         self.store = store
         self.io = ClaudeConfigIO(env: env, keychain: kc)
@@ -321,7 +336,7 @@ final class AccountsState: ObservableObject {
             let names = reassigned
                 .map { "\($0.nickname) (\($0.from.displayName)→\($0.to.displayName))" }
                 .joined(separator: ", ")
-            let warn = loc("구버전이 저장한 계정 목록에서 프로바이더 정보가 소실돼 복구했습니다: %@", names)
+            let warn = l.accountsErrorProviderHealed(names)
             initError = initError.map { "\($0)\n\(warn)" } ?? warn
         }
         self.file = store.file
@@ -581,8 +596,8 @@ final class AccountsState: ObservableObject {
                         // 함께 도는 validateFallbacksLocally는 로컬 검사(allowNetwork:false)라
                         // 못 잡는다. 여기서 알림을 전담한다(check가 이미 needsReauth 마킹).
                         reauthChanged = true
-                        notify(title: loc("재로그인 필요"),
-                               body: loc("%@ 계정의 인증이 만료됐어요. 카드의 '다시 로그인'을 눌러주세요.", profile.nickname))
+                        notify(title: l.accountsNotifyReauthTitle,
+                               body: l.accountsNotifyReauthBody(profile.nickname))
                         continue
                     case .locallyDead, .noRefreshToken:
                         // **로컬로 판정 가능**한 죽음 — 매 팝오버 함께 도는 validateFallbacksLocally가
@@ -630,8 +645,8 @@ final class AccountsState: ObservableObject {
                     if marked {
                         try? store.setNeedsReauth(profile.id, true)
                         reauthChanged = true
-                        notify(title: loc("재로그인 필요"),
-                               body: loc("%@ 계정의 인증이 만료됐어요. 카드의 '다시 로그인'을 눌러주세요.", profile.nickname))
+                        notify(title: l.accountsNotifyReauthTitle,
+                               body: l.accountsNotifyReauthBody(profile.nickname))
                     }
                     // 위 규칙이 못 잡는 죽음(활성 계정의 진짜 폐기)은 이제 무상태 배지
                     // (AuthSuspicion.cheapConditionsHold/confirmed — recomputeBadgeCheap/Live)가
@@ -768,8 +783,8 @@ final class AccountsState: ObservableObject {
                 let r = await fallbackChecker.check(p.id, activeAccountID: active, now: now, allowNetwork: false)
                 if r == .noRefreshToken || r == .locallyDead {
                     changed = true   // targets는 !needsReauth만 → 새 전이 → 1회 알림
-                    notify(title: loc("재로그인 필요"),
-                           body: loc("%@ 계정의 로그인이 만료됐어요. 카드의 '다시 로그인'을 눌러주세요.", p.nickname))
+                    notify(title: l.accountsNotifyReauthTitle,
+                           body: l.accountsNotifySignInExpiredBody(p.nickname))
                 }
             }
             if changed { MobiusNotification.postAccountsChanged(); reload() }
@@ -785,8 +800,8 @@ final class AccountsState: ObservableObject {
         switch r {
         case .dead, .locallyDead, .noRefreshToken, .storeFailed:
             let name = store.file.accounts.first { $0.id == id }?.nickname ?? "?"
-            notify(title: loc("재로그인 필요"),
-                   body: loc("%@ 계정의 로그인이 만료돼 전환을 건너뛰었어요. '다시 로그인'을 눌러주세요.", name))
+            notify(title: l.accountsNotifyReauthTitle,
+                   body: l.accountsNotifySwitchSkippedBody(name))
             return false
         default:
             return true   // refreshedAlive / transient / notFallback → 전환 진행
@@ -817,8 +832,8 @@ final class AccountsState: ObservableObject {
                 changed = true
             case .dead, .locallyDead, .noRefreshToken, .storeFailed:
                 changed = true
-                notify(title: loc("재로그인 필요"),
-                       body: loc("%@ 계정의 로그인이 만료됐어요. 카드의 '다시 로그인'을 눌러주세요.", p.nickname))
+                notify(title: l.accountsNotifyReauthTitle,
+                       body: l.accountsNotifySignInExpiredBody(p.nickname))
             default:
                 break
             }
@@ -925,8 +940,8 @@ final class AccountsState: ObservableObject {
                 guard activeBefore[provider] != after, activeBefore[provider] != nil,
                       let name = store.file.accounts.first(where: { $0.id == after })?.nickname
                 else { continue }
-                notify(title: loc("%@ 활성 계정이 밖에서 바뀌었어요", provider.displayName),
-                       body: loc("외부 로그인 또는 실행 중 세션의 갱신으로 활성 계정이 %@(으)로 바뀌었습니다. 카드를 눌러 되돌릴 수 있어요.", name))
+                notify(title: l.accountsNotifyExternalChangeTitle(provider.displayName),
+                       body: l.accountsNotifyExternalChangeBody(name))
             }
         }
         // 활성 계정 스냅샷을 5분마다 라이브(갱신된 토큰)와 동기화 — 오래 쓰다 크래시해도
@@ -953,7 +968,7 @@ final class AccountsState: ObservableObject {
                 if store.file.active(of: .claude) != nil {
                     consecutiveSyncFailures += 1
                     if consecutiveSyncFailures >= 3 {
-                        lastError = loc("활성 계정 동기화가 계속 실패하고 있어요 — 자동 전환·배지가 잠시 지연될 수 있어요.")
+                        lastError = l.accountsErrorSyncStalled
                     }
                 }
             }
@@ -1513,26 +1528,26 @@ final class AccountsState: ObservableObject {
         switch decision {
         case .none: break
         case .allExhausted:
-            notify(title: loc("%@ 모든 계정 한도 소진", provider.displayName),
-                   body: loc("전환 가능한 계정이 없습니다. 리셋을 기다려주세요."))
+            notify(title: l.accountsNotifyAllExhaustedTitle(provider.displayName),
+                   body: l.accountsNotifyAllExhaustedBody)
         case let .notifyAdvisoryOnly(id):
             // 임계값 선제 경고 알림 — **소진이 아니다**(문구가 섞이면 거짓말). 자동 전환이
             // 꺼진 풀에서만 온다. 계정+창(resetsAt) 전이당 1회 — 엔진이 alreadyAdvised로
             // 걸러 이 케이스를 딱 한 번만 돌려주므로(pollThreshold의 last-advised 맵) 여기선
             // 무조건 알린다.
             let name = store.file.accounts.first { $0.id == id }?.nickname ?? "?"
-            notify(title: loc("⚠️ %@ 계정 한도가 가까워요", name),
-                   body: loc("%@ 계정이 설정한 임계값에 도달했어요. 자동 전환이 꺼져 있으니 필요하면 직접 전환하세요.", name))
+            notify(title: l.accountsNotifyAdvisoryTitle(name),
+                   body: l.accountsNotifyAdvisoryBody(name))
         case let .notifyExhaustedOnly(id):
             let name = store.file.accounts.first { $0.id == id }?.nickname ?? "?"
-            notify(title: loc("한도 소진 — 자동 전환이 꺼져 있습니다"),
-                   body: loc("%@ 계정이 한도에 도달했습니다. 수동으로 전환하세요.", name))
+            notify(title: l.accountsNotifyExhaustedManualTitle,
+                   body: l.accountsNotifyExhaustedManualBody(name))
         case let .notifyModelLimitedOnly(id):
             // ★ "계정 한도 소진"과 문구를 공유하면 거짓말이 된다 — 계정은 다른 모델로 계속
             //   쓸 수 있다(같은 이유로 메뉴바·CLI도 이 상태를 소진으로 표시하지 않는다).
             let name = store.file.accounts.first { $0.id == id }?.nickname ?? "?"
-            notify(title: loc("모델 한도 — 자동 전환이 꺼져 있습니다"),
-                   body: loc("%@ 계정에서 이 모델만 한도에 걸렸어요. 계정은 다른 모델로 계속 쓸 수 있어요.", name))
+            notify(title: l.accountsNotifyModelLimitedManualTitle,
+                   body: l.accountsNotifyModelLimitedManualBody(name))
         case let .switchTo(id, reason):
             // 전환 직전 검증(Claude 전용): 자동 폴백(activeExhausted)이나 임계값 선제
             // 전환(thresholdAdvisory)으로 넘어가기 전에 대상 계정을 실제 OAuth refresh로
@@ -1574,29 +1589,30 @@ final class AccountsState: ObservableObject {
                 //   드러나야 한다. 세 알림이 같은 note를 공유하므로 복귀 알림도 함께 맞는다.
                 let sessionNote: String
                 switch provider {
-                case .claude: sessionNote = loc("실행 중인 세션도 다음 입력부터 새 계정으로 이어져요.")
-                case .codex: sessionNote = loc("실행 중인 codex 세션은 종료해야 새 계정이 적용돼요.")
+                case .claude: sessionNote = l.accountsNotifySessionNoteClaude
+                case .codex: sessionNote = l.accountsNotifySessionNoteCodex
                 }
                 switch reason {
                 case .primaryRecovered:
-                    notify(title: loc("✅ %@ 계정으로 복귀했어요", name),
-                           body: loc("한도가 초기화돼 주 계정으로 돌아왔어요. %@", sessionNote))
+                    notify(title: l.accountsNotifyPrimaryRecoveredTitle(name),
+                           body: l.accountsNotifyPrimaryRecoveredBody(note: sessionNote))
                 case .thresholdAdvisory:
                     // ★ 소진 표현 금지 — 아직 쓸 수 있는데 임계값에 가까워 미리 옮긴 것이다.
-                    notify(title: loc("🔄 %@ 계정으로 미리 전환했어요", name),
-                           body: loc("%@ 계정이 한도에 가까워져 여유 있는 %@(으)로 미리 전환했어요. %@",
-                                     fromName ?? "?", name, sessionNote))
+                    notify(title: l.accountsNotifyAdvisorySwitchTitle(name),
+                           body: l.accountsNotifyAdvisorySwitchBody(from: fromName ?? "?", to: name,
+                                                                   note: sessionNote))
                 case .activeExhausted:
-                    notify(title: loc("🔄 %@ 계정으로 전환했어요", name),
-                           body: loc("%@ 한도 소진 → %@. %@", fromName ?? "?", name, sessionNote))
+                    notify(title: l.accountsNotifySwitchedTitle(name),
+                           body: l.accountsNotifySwitchedBody(from: fromName ?? "?", to: name,
+                                                              note: sessionNote))
                 case .modelExhausted:
                     // ★ 계정 소진과 문구를 섞지 않는다 — 떠난 계정은 다른 모델로 멀쩡히 쓸 수 있다.
-                    notify(title: loc("🔄 %@ 계정으로 전환했어요", name),
-                           body: loc("%@ 계정에서 이 모델의 한도에 걸려 %@(으)로 옮겼어요. %@",
-                                     fromName ?? "?", name, sessionNote))
+                    notify(title: l.accountsNotifySwitchedTitle(name),
+                           body: l.accountsNotifyModelSwitchedBody(from: fromName ?? "?", to: name,
+                                                                   note: sessionNote))
                 }
             } catch {
-                lastError = loc("자동 전환 실패: %@", error.localizedDescription)
+                lastError = l.accountsErrorAutoSwitchFailed(error.localizedDescription)
                 return
             }
             // Desktop 자동 Fallback (Claude 전용): 옵션 켬 + 대상 스냅샷 존재 시에만
@@ -1661,7 +1677,7 @@ final class AccountsState: ObservableObject {
             MobiusNotification.postAccountsChanged()
             reload()
         } catch {
-            lastError = loc("전환 실패: %@", error.localizedDescription)
+            lastError = l.accountsErrorSwitchFailed(error.localizedDescription)
             return
         }
         // Desktop 동시 전환 (Claude 전용 — 옵션 켜짐 + 대상 스냅샷 존재 시)
@@ -1683,14 +1699,14 @@ final class AccountsState: ObservableObject {
         // 직렬화 게이트: 이전 Desktop 전환이 진행 중이면 이번 요청은 드롭 —
         // 연속 전환(A→B, B→C)이 겹치며 스냅샷이 교차 오염되는 것을 방지 (코디네이터도 재차 차단).
         guard desktopSwitchTask == nil else {
-            lastError = loc("Desktop 전환이 진행 중입니다 — 이번 전환에서는 Desktop을 건너뜁니다.")
+            lastError = l.accountsErrorDesktopSwitchBusy
             return
         }
         let targetUncaptured = !desktopSwitcher.hasSnapshot(for: id)
         desktopSwitchTask = Task { @MainActor in
             defer { desktopSwitchTask = nil }
             do { try await desktopCoordinator.switchDesktop(from: fromID, to: id) }
-            catch { lastError = loc("Desktop 전환 실패(CLI는 전환됨): %@", error.localizedDescription); return }
+            catch { lastError = l.accountsErrorDesktopSwitchFailed(l.accountsErrorMessage(error)); return }
             // 미캡처 계정으로 전환 = Desktop 로그아웃됨. 이제 사용자가 Desktop에 로그인하면
             // 그 세션을 자동으로 캡처해 다음부터는 전환만으로 복원되게 한다.
             if targetUncaptured { startDesktopAutoCapture(for: id) }
@@ -1726,9 +1742,9 @@ final class AccountsState: ObservableObject {
                         MobiusNotification.postAccountsChanged()
                         reload()
                         let name = store.file.accounts.first { $0.id == id }?.nickname ?? "?"
-                        notify(title: loc("Claude Desktop 자동 연결됨"),
-                               body: loc("%@ 계정의 Desktop 세션을 저장했어요. 이제 전환하면 자동으로 이어집니다.", name))
-                    } catch { lastError = loc("Desktop 자동 캡처 실패: %@", error.localizedDescription) }
+                        notify(title: l.accountsNotifyDesktopLinkedTitle,
+                               body: l.accountsNotifyDesktopLinkedBody(name))
+                    } catch { lastError = l.accountsErrorDesktopAutoCaptureFailed(error.localizedDescription) }
                     return
                 }
             }
@@ -1770,7 +1786,7 @@ final class AccountsState: ObservableObject {
 
     func setPrimary(_ id: UUID) {
         do { try store.setPrimary(id) } catch {
-            lastError = loc("Primary 변경 실패: %@", error.localizedDescription)
+            lastError = l.accountsErrorSetPrimaryFailed(error.localizedDescription)
             return
         }
         MobiusNotification.postAccountsChanged()
@@ -1798,9 +1814,9 @@ final class AccountsState: ObservableObject {
         guard loginFlow == nil else { return } // 진행 중이면 중복 실행 방지
         // 계정 추가는 `claude auth login`으로 동작 — CLI가 없으면 설정에서 설치하도록 안내
         guard ClaudeCLI.isInstalled else {
-            lastError = loc("Claude Code CLI가 필요합니다 — 설정에서 설치하세요.")
-            notify(title: loc("Claude Code CLI 필요"),
-                   body: loc("계정을 추가하려면 먼저 Claude Code CLI를 설치하세요. 설정 → 설치 현황에서 설치할 수 있어요."))
+            lastError = l.accountsErrorClaudeCLIMissing
+            notify(title: l.accountsNotifyClaudeCLINeededTitle,
+                   body: l.accountsNotifyClaudeCLINeededBody)
             return
         }
         let flow = LoginFlowController(io: io, store: store, switcher: switcher)
@@ -1809,10 +1825,10 @@ final class AccountsState: ObservableObject {
             do {
                 switch try await flow.run() {
                 case .added(let profile):
-                    notify(title: loc("계정 추가 완료"),
+                    notify(title: l.accountsNotifyAccountAddedTitle,
                            body: "\(profile.nickname) <\(profile.emailAddress)>")
                 case .refreshed(let profile):
-                    notify(title: loc("기존 계정 자격증명 갱신됨"),
+                    notify(title: l.accountsNotifyAccountRefreshedTitle,
                            body: "\(profile.nickname) <\(profile.emailAddress)>")
                 }
                 reload()
@@ -1821,9 +1837,10 @@ final class AccountsState: ObservableObject {
                 // 필요할 때 직접 한다 (계정 추가 흐름에 끼워넣으면 저장 계정이 뒤섞였음).
                 return
             } catch {
-                lastError = error.localizedDescription
+                let message = l.accountsErrorMessage(error)
+                lastError = message
                 // 팝오버가 닫혀 있어도 인지할 수 있도록 알림으로도 전달
-                notify(title: loc("계정 추가 실패"), body: error.localizedDescription)
+                notify(title: l.accountsNotifyAddFailedTitle, body: message)
             }
             loginFlow = nil
         }
@@ -1858,11 +1875,11 @@ final class AccountsState: ObservableObject {
         guard let profile = store.file.accounts.first(where: { $0.id == id }) else { return }
         // 안전 가드: Desktop 캡처는 현재 활성 계정의 세션을 잡으므로, 활성 계정에서만 허용한다.
         guard id == store.file.activeAccountID else {
-            lastError = loc("먼저 이 계정으로 전환한 뒤 Claude Desktop을 연결하세요.")
+            lastError = l.accountsErrorDesktopNeedsActive
             return
         }
         guard desktopSwitcher.isDesktopInstalled else {
-            lastError = loc("Claude Desktop이 설치되어 있지 않습니다.")
+            lastError = l.accountsErrorDesktopNotInstalled
             return
         }
         desktopCapture = DesktopCaptureSession(accountID: id, nickname: profile.nickname)
@@ -1883,7 +1900,7 @@ final class AccountsState: ObservableObject {
             await desktopCoordinator.terminateAndWait()
             try? desktopSwitcher.restoreStashedIdentity(from: stash)
             if await !desktopCoordinator.launch() {
-                lastError = loc("Claude Desktop 재실행 실패 — 업데이트 적용 중일 수 있어요. 잠시 후 수동으로 실행해주세요.")
+                lastError = l.accountsErrorDesktopRelaunchManual
             }
         }
     }
@@ -1895,12 +1912,12 @@ final class AccountsState: ObservableObject {
         do {
             desktopCaptureStash = try desktopSwitcher.stashLiveIdentity()
         } catch {
-            desktopCapture?.step = .failed(loc("Desktop 로그아웃 실패: %@", error.localizedDescription))
+            desktopCapture?.step = .failed(l.accountsErrorDesktopLogoutFailed(error.localizedDescription))
             return
         }
         if await !desktopCoordinator.launch() {
             desktopCapture?.step = .failed(
-                loc("Claude Desktop 재실행 실패 — 업데이트 적용 중일 수 있어요. 잠시 후 다시 시도해주세요."))
+                l.accountsErrorDesktopRelaunchRetry)
             return
         }
         guard !Task.isCancelled, desktopCapture?.accountID == id else { return }
@@ -1924,7 +1941,7 @@ final class AccountsState: ObservableObject {
                     // 재실행했는데도 로그아웃이 안 됨 — 6초까지 기다려보고 계속이면 실패 판정.
                     if Date().timeIntervalSince(stillLoggedInSince) >= 6 {
                         desktopCapture?.step = .failed(
-                            loc("Claude Desktop 로그아웃에 실패했어요. 잠시 후 다시 시도하거나, Desktop을 완전히 종료한 뒤 다시 연결해주세요."))
+                            l.accountsErrorDesktopLogoutStuck)
                         return
                     }
                 } else {
@@ -1942,14 +1959,14 @@ final class AccountsState: ObservableObject {
                 return
             }
         }
-        desktopCapture?.step = .failed(loc("5분 안에 로그인이 감지되지 않았습니다. 다시 시도해주세요."))
+        desktopCapture?.step = .failed(l.accountsErrorDesktopLoginTimeout)
     }
 
     private func finishDesktopCapture(for id: UUID) {
         // 로그인 전(신원 파일 없음)에 저장을 누른 경우 빈 세션을 캡처하지 않도록 막는다.
         guard desktopSwitcher.identityLastModified() != nil else {
             desktopCapture?.step = .failed(
-                loc("아직 로그인이 감지되지 않았어요. Claude Desktop에서 로그인을 마친 뒤 다시 저장을 눌러주세요."))
+                l.accountsErrorDesktopLoginNotDetected)
             return
         }
         desktopCapture?.step = .saving
@@ -1962,10 +1979,10 @@ final class AccountsState: ObservableObject {
             reload()
             desktopCapture?.step = .done
             let name = store.file.accounts.first { $0.id == id }?.nickname ?? "?"
-            notify(title: loc("Desktop 스냅샷 저장"),
-                   body: loc("%@ 전환 시 Claude Desktop도 함께 전환됩니다.", name))
+            notify(title: l.accountsNotifyDesktopSnapshotSavedTitle,
+                   body: l.accountsNotifyDesktopSnapshotSavedBody(name))
         } catch {
-            desktopCapture?.step = .failed(loc("저장 실패: %@", error.localizedDescription))
+            desktopCapture?.step = .failed(l.accountsErrorDesktopSaveFailed(error.localizedDescription))
         }
     }
 

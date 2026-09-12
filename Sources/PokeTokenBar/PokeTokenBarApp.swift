@@ -98,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Task { await companion.preparePokemonProfiles() }
         updater = UpdateChecker()
         store.localizationLanguage = companion.language   // 알림 현지화용 미러 시드
+        // 계정 전환 알림·에러 문구도 같은 미러를 쓴다. `AccountsState` 는 위 launch sequence 에서
+        // **`CompanionStore` 보다 먼저** 만들어지므로(순서는 데이터 보존 때문에 못 바꾼다) 시드는
+        // 여기서 한다 — 그 전에 만들어지는 init 에러 두 개만 시스템 언어로 남는다.
+        accounts.localizationLanguage = companion.language
         store.onRefresh = { [weak self] in self?.onStoreRefreshed() }   // 한도 로드 후 companion·사탕 지급
         wireAccountSwitchToLimits()
         floatingPet = FloatingPetController(

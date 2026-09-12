@@ -1,13 +1,10 @@
 import AppKit
 import MobiusCore
 
-enum DesktopCoordinatorError: Error, LocalizedError {
+/// `LoginFlowError` 와 같은 이유로 `LocalizedError` 가 아니다 — 사용자 문구는
+/// `L.accountsErrorMessage(_:)` 가 만든다.
+enum DesktopCoordinatorError: Error {
     case switchInProgress
-    var errorDescription: String? {
-        switch self {
-        case .switchInProgress: return loc("이전 Desktop 전환이 아직 진행 중입니다.")
-        }
-    }
 }
 
 /// Desktop 앱의 종료 → 스왑 → 재실행 시퀀스.

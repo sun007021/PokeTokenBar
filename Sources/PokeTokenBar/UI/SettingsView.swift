@@ -6,6 +6,9 @@ struct SettingsView: View {
     @Environment(UsageStore.self) private var store
     @Environment(CompanionStore.self) private var companion
     @Environment(UpdateChecker.self) private var updater
+    /// 계정 전환 섹션이 쓰는 상태. 언어 픽커가 이 계층의 현지화 미러도 함께 갱신한다
+    /// (`AccountsState.localizationLanguage` — 알림·에러 문구는 뷰 밖에서 만들어진다).
+    @EnvironmentObject private var accounts: AccountsState
     /// 팝오버 내부 화면 전환 방식 — sheet/dismiss 를 쓰지 않는다 (PopoverView 의 NOTE 참조)
     var onClose: () -> Void
     /// 기존 컬렉션의 도감으로 돌아가 대표 포켓몬을 고르게 한다.
@@ -152,7 +155,13 @@ struct SettingsView: View {
                 Spacer()
                 Picker("", selection: Binding(
                     get: { companion.language },
-                    set: { companion.setLanguage($0); store.localizationLanguage = $0 })) {
+                    set: {
+                        companion.setLanguage($0)
+                        // 뷰 밖에서 문구를 만드는 두 계층의 언어 미러 — 여기서 같이 갱신하지
+                        // 않으면 언어를 바꿔도 알림·배너만 옛 언어로 남는다.
+                        store.localizationLanguage = $0
+                        accounts.localizationLanguage = $0
+                    })) {
                     ForEach(AppLanguage.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 .labelsHidden().pickerStyle(.menu).fixedSize()

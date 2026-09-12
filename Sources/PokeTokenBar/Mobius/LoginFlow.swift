@@ -325,18 +325,10 @@ enum LoginFlowResult {
     case refreshed(AccountProfile)  // 같은 계정 재로그인 → 토큰 갱신
 }
 
-enum LoginFlowError: LocalizedError {
+/// ★ `LocalizedError` 가 아니다 — 문구에는 앱 언어가 필요한데 `errorDescription` 은 아무것도
+/// 받지 못한다. 사용자 문구는 `L.accountsErrorMessage(_:)` 가 만든다(`SaveTransferError` 와 같은
+/// 구조). 그래서 이 케이스를 **표시하는 자리는 반드시 그 매핑을 거쳐야 한다** — 그냥
+/// `localizedDescription` 을 쓰면 "The operation couldn't be completed…" 가 그대로 노출된다.
+enum LoginFlowError: Error {
     case urlNotFound, timeout, canceled, claudeNotFound
-    var errorDescription: String? {
-        switch self {
-        case .claudeNotFound:
-            return loc("claude CLI를 찾지 못했어요. 설치를 확인하거나, 터미널에서 `claude auth login`으로 로그인한 뒤 `mobius capture <이름>`으로 계정을 등록하세요.")
-        case .urlNotFound:
-            return loc("로그인 URL을 얻지 못했습니다. 터미널에서 `claude auth login`으로 로그인한 뒤 `mobius capture <이름>`으로 계정을 등록하세요.")
-        case .timeout:
-            return loc("로그인 대기 시간이 초과되었습니다. 다시 시도해주세요.")
-        case .canceled:
-            return loc("로그인이 취소되었습니다.")
-        }
-    }
 }
