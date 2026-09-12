@@ -1088,4 +1088,45 @@ struct L {
     func accountsDurationDays(_ days: Int, _ hours: Int) -> String { t("\(days)일 \(hours)시간", "\(days)d \(hours)h", "\(days)日\(hours)時間", "\(days) d \(hours) h", "\(days) j \(hours) h", "\(days) d \(hours) h", "\(days) T \(hours) Std.") }
     func accountsDurationHours(_ hours: Int, _ minutes: Int) -> String { t("\(hours)시간 \(minutes)분", "\(hours)h \(minutes)m", "\(hours)時間\(minutes)分", "\(hours) h \(minutes) min", "\(hours) h \(minutes) min", "\(hours) h \(minutes) min", "\(hours) Std \(minutes) Min") }
     func accountsDurationMinutes(_ minutes: Int) -> String { t("\(minutes)분", "\(minutes)m", "\(minutes)分", "\(minutes) min", "\(minutes) min", "\(minutes) min", "\(minutes) Min") }
+
+    // MARK: 계정 전환 설정 섹션 (Settings > 계정 전환)
+    // 폭 주의: 설정 카드가 쓸 수 있는 폭은 `PopoverMetrics.contentWidth`(360 - 14*2 = 332pt)
+    // 이고, 토글 스위치가 오른쪽을 먹는다. 라벨은 한 줄에 들어가야 하며 설명은
+    // 캡션(caption2)으로 접힌다 — `AccountSwitchingSettingsTests` 가 7개 언어로 **프로덕션
+    // 행 빌더**를 렌더해 잰다. 재는 값은 렌더 폭이 아니라 **이상적 폭**이다: 라벨이 길면
+    // 행이 넓어지는 게 아니라 말줄임으로 줄어들어, 렌더 폭만 보면 늘 통과한다.
+
+    var accountsSettingsSectionTitle: String { t("계정 전환", "Account switching", "アカウント切り替え", "Cambio de cuenta", "Changement de compte", "Troca de conta", "Kontowechsel") }
+    var accountsSettingsEnable: String { t("계정 전환 사용", "Enable account switching", "アカウント切り替えを使う", "Activar cambio de cuenta", "Activer le changement de compte", "Ativar troca de conta", "Kontowechsel aktivieren") }
+    /// 마스터 토글의 캡션 — 이 섹션에서 유일하게 개념(무엇을·언제)을 설명하는 자리다.
+    /// 아래 자동 전환 행들이 캡션 없이 한 줄로 남을 수 있는 이유이기도 하다.
+    var accountsSettingsEnableHint: String {
+        t("Claude·Codex 계정을 전환하고, 한도가 차면 다음 계정으로 자동으로 이어 써요. 끄면 계정 탭과 주기 검사가 모두 멈춰요.",
+          "Switch between Claude and Codex accounts, and hand over to the next one when a limit fills. Off hides the Accounts tab and stops every background check.",
+          "Claude・Codex のアカウントを切り替え、上限に達したら次のアカウントへ自動で引き継ぎます。オフにするとアカウントタブも定期チェックも止まります。",
+          "Cambia entre cuentas de Claude y Codex, y pasa a la siguiente cuando se llena un límite. Al desactivarlo se oculta la pestaña Cuentas y se detienen las comprobaciones.",
+          "Bascule entre les comptes Claude et Codex et passe au suivant quand une limite est atteinte. Désactivé, l'onglet Comptes disparaît et toutes les vérifications s'arrêtent.",
+          "Alterna entre contas Claude e Codex e passa para a próxima quando um limite enche. Desligado, a aba Contas some e todas as verificações param.",
+          "Wechselt zwischen Claude- und Codex-Konten und übergibt an das nächste, sobald ein Limit voll ist. Aus: Der Konten-Tab verschwindet und alle Hintergrundprüfungen stoppen.")
+    }
+    /// 풀별 자동 전환 행 — 프로바이더 이름(`Provider.displayName`)은 번역하지 않는 고유명사다.
+    func accountsSettingsAutoSwitch(_ provider: String) -> String { t("\(provider) 자동 전환", "Auto-switch · \(provider)", "\(provider) 自動切り替え", "Cambio automático · \(provider)", "Bascule auto · \(provider)", "Troca automática · \(provider)", "Autom. Wechsel · \(provider)") }
+    var accountsSettingsShowGauges: String { t("사용량 게이지 표시", "Show usage gauges", "使用量ゲージを表示", "Mostrar indicadores de uso", "Afficher les jauges d'usage", "Mostrar medidores de uso", "Nutzungsanzeigen einblenden") }
+    /// 전환이 헤드라인이지 알림이 아니다 — 원본의 문구 결정(2026-07-21)을 그대로 따른다.
+    var accountsSettingsAdvisory: String { t("한도 차기 전 미리 전환", "Switch before the limit fills", "上限に達する前に切り替え", "Cambiar antes del límite", "Basculer avant la limite", "Trocar antes do limite", "Vor dem Limit wechseln") }
+    /// 5분 폴링이 생기는 기능이라 비용을 문구에 밝힌다(기본 꺼짐인 이유).
+    var accountsSettingsAdvisoryHint: String {
+        t("활성 Claude 계정의 사용량을 5분마다 확인해, 기준에 닿으면 미리 전환해요.",
+          "Checks the active Claude account's usage every 5 minutes and switches early once it reaches the threshold.",
+          "アクティブな Claude アカウントの使用量を5分ごとに確認し、基準に達したら先に切り替えます。",
+          "Comprueba el uso de la cuenta activa de Claude cada 5 minutos y cambia antes al llegar al umbral.",
+          "Vérifie l'usage du compte Claude actif toutes les 5 minutes et bascule dès le seuil atteint.",
+          "Verifica o uso da conta Claude ativa a cada 5 minutos e troca assim que atingir o limiar.",
+          "Prüft die Nutzung des aktiven Claude-Kontos alle 5 Minuten und wechselt beim Schwellenwert vorab.")
+    }
+    /// 부모('Claude 자동 전환')가 꺼져 있을 때의 캡션 — 이 행이 왜 비활성인지 말해 주지 않으면
+    /// 사용자에게는 그냥 눌리지 않는 토글이다. 부모 이름을 넣어 어디를 켜야 하는지까지 가리킨다.
+    func accountsSettingsAdvisoryNeedsParent(_ parent: String) -> String { t("\(parent)이 켜져 있을 때만 쓸 수 있어요.", "Available only while \(parent) is on.", "\(parent)がオンのときだけ使えます。", "Solo disponible con \(parent) activado.", "Disponible uniquement si \(parent) est activé.", "Disponível apenas com \(parent) ativado.", "Nur verfügbar, wenn \(parent) aktiviert ist.") }
+    /// 임계값 픽커의 접근성 라벨 — 화면에는 값(%)만 보인다.
+    var accountsSettingsThreshold: String { t("전환 기준", "Threshold", "切り替え基準", "Umbral", "Seuil", "Limiar", "Schwellenwert") }
 }

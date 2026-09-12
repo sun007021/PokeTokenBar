@@ -21,7 +21,7 @@ struct AccountsView: View {
     /// 게이지 표시 여부는 Mobius 쪽 키를 그대로 쓴다(설정 UI 는 Phase 5). 키가 없으면 켬 —
     /// `AccountsState` 의 usage 폴링 게이트(`object == nil || bool`)와 같은 기본값이어야
     /// "값은 받아오는데 안 보인다"(또는 그 반대)가 생기지 않는다.
-    @AppStorage("mobius.showUsageGauges") private var showUsageGauges = true
+    @AppStorage(MobiusFeature.showUsageGaugesKey) private var showUsageGauges = true
     @State private var now = Date()
     /// 카드 행의 실측 콘텐츠 높이(행 인셋 제외). 계정 삭제 후 남는 키는 무해(참조 안 됨).
     @State private var rowHeights: [UUID: CGFloat] = [:]

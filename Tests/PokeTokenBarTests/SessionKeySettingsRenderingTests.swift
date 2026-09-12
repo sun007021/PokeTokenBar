@@ -20,9 +20,15 @@ final class SessionKeySettingsRenderingTests: XCTestCase {
         let companion = CompanionStore(fileURL: file, defaults: defaults)
         let navigation = PopoverNavigation()
         navigation.openSessionKeySettings()
+        // SettingsView carries the account-switching section, so it needs that environment object
+        // even when the section is collapsed to its master toggle — SwiftUI resolves
+        // `@EnvironmentObject` when the body runs, not when the section is shown. The state is
+        // isolated to a temp directory and never started (see `MobiusTestSupport`).
+        let accounts = try MobiusTestSupport.isolatedAccountsState(cleanupWith: self)
         let host = NSHostingController(rootView: SettingsView(
             onClose: {}, onChooseRepresentative: {}, startExpanded: navigation.expandAdvancedOnOpen)
             .environment(usage).environment(companion).environment(UpdateChecker())
+            .environmentObject(accounts)
             .frame(width: PopoverMetrics.width))
         let previousKeyWindow = NSApp.keyWindow
         let window = SessionKeyTestWindow(contentRect: NSRect(x: -10000, y: -10000, width: PopoverMetrics.width, height: 460),

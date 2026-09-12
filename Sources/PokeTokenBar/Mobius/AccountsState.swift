@@ -229,21 +229,31 @@ final class AccountsState: ObservableObject {
 
     /// 임계값 선제 전환 기능 토글(기본 꺼짐). 설정 UI가 같은 키를 쓴다.
     private var advisorySwitchEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "mobius.advisorySwitchEnabled")
+        UserDefaults.standard.bool(forKey: MobiusFeature.advisorySwitchEnabledKey)
     }
-    /// ★ 유효 게이트 — 미리 전환은 '자동 전환(Claude)'의 하위 옵션이라 **부모가 켜져 있을
-    /// 때만** 동작한다(사용자 결정 2026-07-24: 부모 off면 UI도 강제 off+disabled — 구 "표시만"
-    /// 모드 제거). 폴링·pill 셋/클리어 모두 이 게이트를 본다 — 부모를 끄면 5분 폴링이 서고,
-    /// 남은 advisory pill은 아래 정리 경로가 다음 틱에 걷어간다.
+    /// ★ 유효 게이트의 **단일 정의**. 미리 전환은 '자동 전환(Claude)'의 하위 옵션이라 부모가
+    /// 켜져 있을 때만 동작한다(사용자 결정 2026-07-24: 부모 off면 UI도 강제 off+disabled —
+    /// 구 "표시만" 모드 제거).
+    ///
+    /// 엔진(`advisoryEffectivelyEnabled`)과 설정 UI(`SettingsView.accountSwitchingGroup`)가
+    /// **둘 다 이 함수를 부른다.** 각자 조건을 적으면 한쪽만 바뀌었을 때 "표시는 꺼졌는데 5분
+    /// 폴링은 돈다"가 되고, 그건 화면 어디에도 안 보이므로 사용자가 신고할 수도 없다.
+    /// 규칙이 한 곳에만 있는지는 `AccountSwitchingSettingsTests` 가 소스에서 확인한다.
+    static func advisoryIsEffective(switchEnabled: Bool, claudeAutoSwitchEnabled: Bool) -> Bool {
+        switchEnabled && claudeAutoSwitchEnabled
+    }
+    /// 폴링·pill 셋/클리어가 모두 보는 게이트 — 부모를 끄면 5분 폴링이 서고, 남은 advisory
+    /// pill은 아래 정리 경로가 다음 틱에 걷어간다.
     private var advisoryEffectivelyEnabled: Bool {
-        advisorySwitchEnabled && store.file.isAutoSwitchEnabled(.claude)
+        Self.advisoryIsEffective(switchEnabled: advisorySwitchEnabled,
+                                 claudeAutoSwitchEnabled: store.file.isAutoSwitchEnabled(.claude))
     }
     /// 임계값(%) — 기본 90. 설정 UI 범위 50~95(step 5). Int/Double 저장 모두 관대하게 읽는다.
     private var advisoryThreshold: Double {
-        let raw = UserDefaults.standard.object(forKey: "mobius.advisoryThresholdPercent")
+        let raw = UserDefaults.standard.object(forKey: MobiusFeature.advisoryThresholdPercentKey)
         if let d = raw as? Double { return d }
         if let i = raw as? Int { return Double(i) }
-        return 90
+        return Double(MobiusFeature.advisoryThresholdDefault)
     }
 
     /// 라이브 환경 + PokeTokenBar 상태 디렉터리 주입. `~/.claude`·`~/.codex`(그리고
@@ -396,6 +406,18 @@ final class AccountsState: ObservableObject {
         desktopAutoCaptureTask?.cancel()
     }
 
+    /// 테스트 전용 — 지금 스케줄된 틱 타이머. **객체 자체**를 내주는 이유는 `stop()` 이 필드를
+    /// nil로 만들기만 한 게 아니라 `invalidate()` 까지 했는지 봐야 하기 때문이다. 무효화된
+    /// 타이머는 다시 발화하지 않으므로 `isValid == false` 가 "확실히 멈췄다"의 직접 증거다.
+    /// 켜고 끄기를 반복해도 타이머가 겹치지 않는지는 이 객체의 **동일성**으로 확인한다.
+    /// (테스트 전용 접근자 관례: `AccountCardView.statusBadgesForTesting`,
+    /// `AppDelegate.migrateLegacyStorageIfNeeded(base:)`)
+    var tickTimerForTesting: Timer? { timer }
+
+    /// 테스트 전용 — 외부 변경(CLI) 통지 옵저버가 살아 있는지. 타이머와 함께 걷혀야
+    /// "끄면 아무것도 안 돈다"가 성립한다(옵저버가 남으면 CLI 변경마다 reload가 돈다).
+    var isObservingExternalChangesForTesting: Bool { observer != nil }
+
     /// 테스트 전용 — `start()` 가 곧바로 띄우는 틱의 핸들. 취소됐는지(`isCancelled`)와
     /// 실제로 끝나는지(`await value`)를 둘 다 봐야 "stop()이 진행 중인 작업을 걷었다"가
     /// 증명된다. 타이머와 달리 이건 **이미 돌고 있는** 작업이라 무효화만으로는 안 멈춘다.
@@ -407,8 +429,7 @@ final class AccountsState: ObservableObject {
         // 돌아왔을 가능성) 연속 실패 카운터를 풀어 배경 폴링을 재개시킨다(사용자 결정).
         consecutiveUsagePollFailures = 0
         loadUsageCacheIfNeeded()
-        guard UserDefaults.standard.object(forKey: "mobius.showUsageGauges") == nil
-                || UserDefaults.standard.bool(forKey: "mobius.showUsageGauges") else { return }
+        guard MobiusFeature.showUsageGauges else { return }
         guard usageTask == nil else { return }
         let now = Date()
         // Claude만 — Codex 게이지는 세션 로그에서 얻는다 (tick의 processCodexBatches).
@@ -546,8 +567,7 @@ final class AccountsState: ObservableObject {
     /// 신선도/쿨다운 기준은 usage[id].fetchedAt(영속됨) — 재시작 후에도 엔드포인트를 난타하지 않는다.
     func refreshCodexUsageIfStale() {
         loadUsageCacheIfNeeded()
-        guard UserDefaults.standard.object(forKey: "mobius.showUsageGauges") == nil
-                || UserDefaults.standard.bool(forKey: "mobius.showUsageGauges") else { return }
+        guard MobiusFeature.showUsageGauges else { return }
         guard codexUsageTask == nil else { return }
         let now = Date()
         let codexActiveID = store.file.activeByProvider[.codex]

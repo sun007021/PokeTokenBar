@@ -71,6 +71,7 @@ struct SettingsView: View {
                         menuBarGroup(store)
                         floatingPetGroup(store)
                         notificationsGroup(store)
+                        accountSwitchingGroup
                         updateGroup(store)
                         transferGroup(store)
                         advancedGroup(store)
@@ -320,6 +321,16 @@ struct SettingsView: View {
                 Toggle("", isOn: $store.statusChecksEnabled)
                     .labelsHidden().toggleStyle(.switch).controlSize(.small)
             }
+        }
+    }
+
+    /// 계정 전환(Claude·Codex) — 행 구성과 상태는 `AccountSwitchingSettingsRows` 가 들고,
+    /// 여기서는 다른 섹션과 같은 카드(`settingsSection`)로 감싸기만 한다. 행을 별도 뷰로 둔
+    /// 이유는 테스트가 **프로덕션 행 자체**를 7개 언어로 렌더해 폭을 잴 수 있어야 하기
+    /// 때문이다(`AccountSwitchingSettingsTests`).
+    private var accountSwitchingGroup: some View {
+        settingsSection(l.accountsSettingsSectionTitle) {
+            AccountSwitchingSettingsRows(l: l)
         }
     }
 
