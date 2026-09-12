@@ -184,4 +184,30 @@ PokeTokenBar 는 `@Observable`(Observation), Mobius `AppState` 는 `@Published` 
 - **Desktop 동시 전환 코드는 남되 UI 미노출**: `performSwitch`/`reload` 에 얽혀 있어 제거 수술이
   오히려 회귀 위험이다. 토글 기본 off 로 잠재운다.
 - **두 앱 병행 실행 금지**: Keychain·`~/.claude.json` 은 전역 자원이라 Mobius.app 과 이 앱이 동시에
-  스왑하면 자격증명이 오염된다. Phase 6 의 실행 감지 가드가 이를 막는다.
+  스왑하면 자격증명이 오염된다. Phase 6 의 실행 감지 가드가 이를 막는다(아래 '이중 writer 가드').
+
+## 이중 writer 가드 (Phase 6)
+
+`MobiusCoexistence` 가 `dev.chussum.mobius`(원본 Mobius.app)의 실행을 감지하면 이 앱의 계정 전환
+엔진이 **물러난다.** 조정이 아니라 양보다 — 원본에는 이 협상에 참여할 코드가 없으므로 아는 쪽이
+항상 물러나야 한 명만 남는다(`SingleInstance` 와 같은 방향의 결정).
+
+막으려는 사고는 **에러로 나타나지 않는다**: 토큰(Keychain)과 이메일(`~/.claude.json`)이 서로 다른
+시점에 갱신되는 찰나를 상대가 읽으면 낡은 토큰과 최신 이메일이 한 프로필에 짝지어지고, 사용자의
+라이브 로그인까지 조용히 오염된다(원본 '실패 기록 1').
+
+| 축 | 결정 |
+|---|---|
+| 감지 | `NSRunningApplication.runningApplications(withBundleIdentifier:)`. 판정은 순수 함수 `isBlocked(by:)` 로 분리했고 `isTerminated` 인스턴스는 세지 않는다 — 세면 Mobius.app 을 종료해도 자동 재개가 영영 안 온다 |
+| 주기 | 5초(`AccountsState.externalAppWatchInterval`). **엔진 틱에 얹지 않는다** — 막힌 동안엔 틱이 없어 복구 신호를 줄 주체가 사라진다 |
+| 범위 | 마스터 토글이 켜져 있는 동안만. `stop()` 은 감시 타이머까지 걷어 "끄면 아무것도 안 돈다"를 유지한다 |
+| 자격증명 경로 | `apply`(자동)·`manualSwitch`/`performSwitch`(수동)·`addAccount` 는 캐시된 플래그가 아니라 **그 자리에서 다시 판정**한다(`externalAppBlocksSwitching`) — 5초 창 안에 상대가 뜨는 경우를 좁힌다 |
+| 표시 | 계정 탭 상단 주황 블록 + 설정 섹션 안내 행, 그리고 탭 컨트롤 `.disabled`. 설명 없이 기능만 죽으면 고장으로 읽힌다 |
+| 재개 | Mobius.app 이 종료되면 5초 안에 자동(앱 재시작 불필요). 팝오버를 열면 그 자리에서도 재판정한다 |
+
+엔진을 내리는 경로가 둘이 되었으므로(사용자의 `stop()`, 가드의 자동 후퇴) 진행 중 작업의 취소는
+`stopEngine()` 한 곳에 모았다 — `AccountsEngineLifecycleTests` 의 Task 필드 스윕도 그 함수를 본다.
+
+감지기는 `AccountsState` 에 주입한다. 진짜 `NSRunningApplication` 조회를 그대로 두면 **개발자
+Mac 에 Mobius.app 이 떠 있는지에 따라 스위트 전체가 흔들리므로**, `MobiusTestSupport` 의 기본값은
+"안 돌고 있다"이고 가드 자체는 `MobiusCoexistenceGuardTests` 가 양쪽 값을 주입해 검증한다.

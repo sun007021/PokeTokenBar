@@ -38,6 +38,13 @@ struct AccountSwitchingSettingsRows: View {
                       hint: l.accountsSettingsEnableHint,
                       isOn: $accountsEnabled)
             if accountsEnabled {
+                // 기존 Mobius.app 이 실행 중이면 엔진이 내려가 있다. 계정 탭에도 같은 안내가
+                // 있지만 이유는 **여기서도** 보여야 한다 — 아래 자동 전환 토글이 켜져 있는데
+                // 아무 일도 안 일어나는 것을 확인하러 오는 화면이 바로 이 화면이다.
+                if accounts.blockedByExternalApp {
+                    Divider()
+                    externalAppRow
+                }
                 ForEach(Provider.allCases, id: \.self) { provider in
                     Divider()
                     toggleRow(
@@ -59,6 +66,25 @@ struct AccountSwitchingSettingsRows: View {
         .onChange(of: accountsEnabled) { _, enabled in
             if enabled { accounts.start() } else { accounts.stop() }
         }
+    }
+
+    /// 이중 writer 안내 행. 토글이 아니라 상태 표시라 `toggleRow` 를 쓰지 않지만, 치수는
+    /// 같은 값(가로 12 / 세로 8)으로 맞춰 행 높이가 어긋나지 않게 한다.
+    private var externalAppRow: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(l.accountsExternalAppTitle)
+                Text(l.accountsExternalAppBody)
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(minHeight: 38)
     }
 
     /// '한도 차기 전 미리 전환' — **'Claude 자동 전환'의 하위 옵션**이다. 부모가 꺼져 있으면

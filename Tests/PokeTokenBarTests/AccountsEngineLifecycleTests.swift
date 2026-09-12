@@ -71,6 +71,26 @@ final class AccountsEngineLifecycleTests: XCTestCase {
         }
     }
 
+    /// 위 스윕이 `stopEngine()` 을 보므로, `stop()` 이 그 함수를 안 부르면 스윕은 초록불인데
+    /// 사용자가 기능을 꺼도 아무것도 안 멈추는 상태가 된다 — 두 조각을 잇는 줄을 직접 잠근다.
+    /// (여기서만 소스로 확인하는 게 아니라 `testStopCancelsTheTickThatStartLaunched` 가 실제
+    /// 취소까지 관찰한다. 이 테스트는 그 계약이 **어느 함수를 거치는지**를 고정한다.)
+    func testStopDelegatesTeardownToStopEngine() throws {
+        let lines = try MobiusTestSupport.sourceLines(
+            of: "Sources/PokeTokenBar/Mobius/AccountsState.swift")
+        guard let start = lines.firstIndex(where: {
+            !MobiusTestSupport.isComment($0) && $0.contains("func stop()")
+        }) else { return XCTFail("stop() 을 못 찾았다") }
+        let indent = String(lines[start].prefix { $0 == " " })
+        var body: [String] = []
+        for line in lines[(start + 1)...] {
+            if line == indent + "}" { break }
+            body.append(line)
+        }
+        XCTAssertTrue(body.contains { !MobiusTestSupport.isComment($0) && $0.contains("stopEngine()") },
+                      "stop() 이 stopEngine() 을 부르지 않으면 취소 스윕은 아무것도 지키지 못한다")
+    }
+
     /// 위 스윕이 **실제로 무언가를 잡는지**(결함 프로토콜 3) — 통과만 보면 아무것도 안 지키는
     /// 스캔과 구별할 수 없다. 새 필드를 하나 주입하고 stop() 에는 넣지 않은 소스를 먹인다.
     func testTaskFieldSweepRejectsANewFieldThatStopIgnores() {
@@ -79,7 +99,7 @@ final class AccountsEngineLifecycleTests: XCTestCase {
                 private var usageTask: Task<Void, Never>?
                 private var ghostTask: Task<Void, Never>?
                 var usageTaskForTesting: Task<Void, Never>? { usageTask }
-                func stop() {
+                private func stopEngine() {
                     timer?.invalidate()
                     usageTask?.cancel()
                 }
@@ -137,10 +157,16 @@ final class AccountsEngineLifecycleTests: XCTestCase {
         }
     }
 
-    /// `func stop()` 의 본문 — 같은 들여쓰기의 닫는 괄호까지.
+    /// 진행 중인 작업을 실제로 취소하는 함수의 본문 — 같은 들여쓰기의 닫는 괄호까지.
+    ///
+    /// `stop()` 이 아니라 `stopEngine()` 을 보는 이유: 이중 writer 가드(Phase 6)가 생기면서
+    /// 엔진을 내리는 경로가 둘이 됐다 — 사용자가 기능을 끄는 `stop()`, 그리고 기존 Mobius.app
+    /// 이 감지돼 자동으로 물러나는 경로. 두 경로가 **같은** 취소 목록을 써야 해서 취소는
+    /// `stopEngine()` 한 곳에 모았고, 이 스윕도 그 함수를 본다. `stop()` 이 그 함수를 실제로
+    /// 부르는지는 `testStopDelegatesTeardownToStopEngine` 이 본다.
     static func stopBody(in lines: [String]) -> [String] {
         guard let start = lines.firstIndex(where: {
-            !MobiusTestSupport.isComment($0) && $0.contains("func stop()")
+            !MobiusTestSupport.isComment($0) && $0.contains("func stopEngine()")
         }) else { return [] }
         let indent = String(lines[start].prefix { $0 == " " })
         var body: [String] = []

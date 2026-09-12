@@ -187,6 +187,24 @@ final class AccountsState: ObservableObject {
     /// "다음 틱이 안 생긴다"까지만 보장되고, **이미 떠 있는 틱은 자동 전환까지 끝까지 간다.**
     private var tickTask: Task<Void, Never>?
     private var observer: NSObjectProtocol?
+
+    // MARK: 이중 writer 가드 (기존 Mobius.app 과의 공존)
+
+    /// 기존 Mobius.app 이 실행 중이라 엔진을 멈춰 둔 상태. 화면에 **반드시 보여야 한다** —
+    /// 설명 없이 기능만 죽으면 사용자에게는 고장으로 읽힌다(`AccountsView` 배너 + 설정 안내).
+    @Published private(set) var blockedByExternalApp = false
+    /// 외부 Mobius.app 감지기. 실제 프로세스를 띄우지 않고는 `NSRunningApplication` 을 만들 수
+    /// 없어 주입 가능하게 둔다 — 가드가 **정말로 엔진을 멈추는지**는 이 주입으로만 검증할 수
+    /// 있다(`MobiusCoexistenceGuardTests`).
+    private let externalMobiusRunning: @MainActor () -> Bool
+    /// 사용자가 기능을 켜 두었는가(= 마스터 토글). 엔진이 **실제로** 도는지와는 다르다 —
+    /// 켜 두었어도 외부 Mobius.app 이 살아 있으면 엔진은 내려가 있다.
+    private var wantsEngine = false
+    /// 외부 앱 감시 타이머. **엔진과 별개로** 돈다 — 막힌 동안에는 틱이 없으므로 여기에 얹지
+    /// 않으면 Mobius.app 을 종료해도 앱을 재시작하기 전까지 영영 복구되지 않는다.
+    private var externalAppWatchTimer: Timer?
+    static let externalAppWatchInterval: TimeInterval = 5
+
     private var lastReconcileAt = Date.distantPast
     private var lastActiveSnapshotSyncAt = Date.distantPast
     static let reconcileInterval: TimeInterval = 15
@@ -269,8 +287,16 @@ final class AccountsState: ObservableObject {
     ///   ★ `MobiusEnvironment.live()`를 그대로 쓰면 `~/Library/Application Support/Mobius`,
     ///   즉 **Mobius.app이 쓰는 바로 그 파일들**을 두 프로세스가 함께 쓰게 되어 자격증명이
     ///   오염된다(`MobiusPaths` 주석 참조). 테스트·진단용으로만 다른 환경을 주입한다.
-    init(env: MobiusEnvironment = AccountsState.isolatedEnvironment()) {
-        let kc = SystemKeychain()
+    /// - Parameter keychain: 기본값은 실제 로그인 키체인(`security` CLI 경유). 테스트는
+    ///   `InMemoryKeychain` 을 넣어 **실제 전환 경로를 그대로 돌린다** — 그러지 않으면 전환
+    ///   후 부작용(캐시 무효화 콜백 등)을 소스 스캔으로밖에 확인할 수 없다.
+    /// - Parameter externalMobiusRunning: 이중 writer 감지기. 위 '이중 writer 가드' 참조.
+    init(env: MobiusEnvironment = AccountsState.isolatedEnvironment(),
+         keychain: any KeychainClient = SystemKeychain(),
+         externalMobiusRunning: @escaping @MainActor () -> Bool
+            = MobiusCoexistence.isExternalMobiusRunning) {
+        let kc = keychain
+        self.externalMobiusRunning = externalMobiusRunning
         self.env = env
         // 초기화 실패(accounts.json 손상 등)는 빈 스토어로 시작하고 에러 표시
         let store: AccountStore
@@ -319,11 +345,43 @@ final class AccountsState: ObservableObject {
 
     // MARK: 수명주기
 
-    /// 주기 처리를 시작한다 — **생성자가 아니라 여기서** 타이머가 돈다. 호스트 앱이 계정 전환
-    /// 기능을 켰을 때만 호출하므로, 꺼져 있으면 이 객체는 아무 일도 하지 않는다(타이머 0,
-    /// Keychain 접근 0, 알림 권한 요청 0).
+    /// 기능을 켠다 — 호스트 앱의 마스터 토글(`mobius.enabled`)과 설정 UI 가 부르는 유일한
+    /// 진입점이다. 꺼져 있으면 이 객체는 아무 일도 하지 않는다(타이머 0, Keychain 접근 0,
+    /// 알림 권한 요청 0).
+    ///
+    /// ★ "켰다"와 "엔진이 돈다"는 **다르다.** 기존 Mobius.app 이 실행 중이면 같은 전역
+    /// 자격증명을 두 프로세스가 스왑하게 되므로(`MobiusCoexistence`) 엔진은 뜨지 않고,
+    /// 대신 가벼운 감시 타이머만 남아 상대가 종료되는 순간 자동으로 이어받는다.
     /// 중복 호출은 무시한다 — 타이머가 겹치면 틱이 쌓여 이슈 #15의 되먹임을 되살린다.
     func start() {
+        guard !wantsEngine else { return }
+        wantsEngine = true
+        startExternalAppWatch()
+        // 감시 타이머의 첫 발화(5초 뒤)를 기다리지 않는다 — 그 사이에 엔진이 떠서 전환을
+        // 한 번 해 버리면 가드가 있으나 마나다.
+        reevaluateExternalApp()
+    }
+
+    /// 외부 Mobius.app 감시를 건다. 판정 자체는 `reevaluateExternalApp()` 이 하고, 이 타이머는
+    /// **엔진이 내려가 있는 동안에도** 살아 있어야 한다 — 자동 재개의 유일한 동력이다.
+    private func startExternalAppWatch() {
+        guard externalAppWatchTimer == nil else { return }
+        externalAppWatchTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.externalAppWatchInterval, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reevaluateExternalApp() }
+        }
+    }
+
+    /// 지금 외부 Mobius.app 이 살아 있는지 다시 보고, 엔진의 가동 상태를 그 결과에 맞춘다.
+    /// 타이머가 주기적으로 부르고, 자격증명을 쓰는 경로도 **그 자리에서** 한 번 더 부른다
+    /// (`externalAppBlocksSwitching()` — 5초 창 안에 상대가 뜨는 경우를 좁힌다).
+    func reevaluateExternalApp() {
+        blockedByExternalApp = externalMobiusRunning()
+        if wantsEngine && !blockedByExternalApp { startEngine() } else { stopEngine() }
+    }
+
+    private func startEngine() {
         guard timer == nil else { return }
 
         // `.app` 번들에서만 — `UNUserNotificationCenter.current()`는 번들 프로세스가 아니면
@@ -370,8 +428,22 @@ final class AccountsState: ObservableObject {
         }
     }
 
-    /// 주기 처리를 멈춘다 — 기능 토글 off, 디스플레이 슬립 등에서 호출한다.
-    /// 스토어·엔진 상태는 그대로 두므로 `start()`로 언제든 재개할 수 있다.
+    /// 기능을 끈다 — 마스터 토글 off, 앱 종료. 엔진과 **외부 앱 감시까지** 모두 걷는다.
+    /// 스토어 상태는 그대로 두므로 `start()`로 언제든 재개할 수 있다.
+    ///
+    /// 진행 중인 작업의 취소는 `stopEngine()` 이 한다(이중 writer 가드도 같은 함수를 쓴다 —
+    /// 막힌 동안 취소가 절반만 되면 가드가 있으나 마나다). `AccountsEngineLifecycleTests` 의
+    /// Task 필드 스윕이 그 함수를 본다.
+    func stop() {
+        wantsEngine = false
+        externalAppWatchTimer?.invalidate()
+        externalAppWatchTimer = nil
+        // 기능 자체가 꺼졌으니 "막혀 있다" 안내도 내린다 — 남기면 꺼진 기능에 대한 배너가 된다.
+        blockedByExternalApp = false
+        stopEngine()
+    }
+
+    /// 주기 처리를 멈춘다 — 기능 토글 off, 이중 writer 가드 작동 시 호출한다.
     ///
     /// ★ 타이머·옵저버만 걷으면 "끄면 아무것도 안 돈다"가 **성립하지 않는다**. `start()` 는
     /// 마지막 줄에서 곧바로 한 틱을 띄우고, 그 틱은 게이트를 지나 자동 전환까지 수행한다 —
@@ -391,8 +463,8 @@ final class AccountsState: ObservableObject {
     ///  - `desktopCaptureTask` — 사용자가 연 가이드 캡처. 이미 **원래 Desktop 로그인을 치워
     ///    둔(stash)** 상태이고 되돌리는 경로는 `endDesktopCapture()` 하나뿐이라, 여기서 취소만
     ///    하면 사용자의 Desktop 로그인이 로그아웃된 채 남는다.
-    ///  - `start()` 의 Keychain 워밍업(`Task.detached`) — 취소 지점이 없는 동기 읽기 1회다.
-    func stop() {
+    ///  - `startEngine()` 의 Keychain 워밍업(`Task.detached`) — 취소 지점이 없는 동기 읽기 1회다.
+    private func stopEngine() {
         timer?.invalidate()
         timer = nil
         if let observer {
@@ -425,6 +497,22 @@ final class AccountsState: ObservableObject {
     /// 실제로 끝나는지(`await value`)를 둘 다 봐야 "stop()이 진행 중인 작업을 걷었다"가
     /// 증명된다. 타이머와 달리 이건 **이미 돌고 있는** 작업이라 무효화만으로는 안 멈춘다.
     var tickTaskForTesting: Task<Void, Never>? { tickTask }
+
+    /// 테스트 전용 — 외부 Mobius.app 감시 타이머. 엔진이 내려간 동안에도 **이것만은** 살아
+    /// 있어야 자동 재개가 성립한다(없으면 사용자가 앱을 재시작해야 복구된다).
+    var externalAppWatchTimerForTesting: Timer? { externalAppWatchTimer }
+
+    /// 자격증명을 실제로 쓰는 경로의 공통 관문. 막혀 있으면 `true` 를 돌려주고 호출부는
+    /// 아무것도 하지 않는다.
+    ///
+    /// 캐시된 `blockedByExternalApp` 을 읽는 대신 **그 자리에서 다시 판정**하는 이유: 감시
+    /// 타이머는 5초 주기라 그 사이에 Mobius.app 이 뜨면 창이 열린다. 전환은 드문 이벤트이므로
+    /// 한 번 더 조회하는 비용이 무의미하고, 반대로 그 창에서 한 번만 겹쳐 써도 라이브 로그인이
+    /// **에러 없이** 오염된다(`MobiusCoexistence`).
+    private func externalAppBlocksSwitching() -> Bool {
+        reevaluateExternalApp()
+        return blockedByExternalApp
+    }
 
     /// 팝오버가 열릴 때 호출 — 캐시가 만료된 계정만 사용량 조회 (상시 폴링 없음)
     func refreshUsageIfStale() {
@@ -1410,6 +1498,10 @@ final class AccountsState: ObservableObject {
         // 취소는 `await` 지점에서만 들리는데 틱에는 그 지점이 여럿이다 — 스캔·usage 조회를
         // 지나 여기 도착했을 때는 이미 `stop()` 이 끝나 있을 수 있다.
         guard !Task.isCancelled else { return }
+        // ★ 같은 이유로 이중 writer 가드도 여기서 한 번 더 본다. 이 틱은 `preflightFallback`
+        // 의 `await` 를 지나오는데, 그 사이에 Mobius.app 이 뜨면 위 취소 확인은 이미 통과한
+        // 뒤다 — 확인을 입구에만 두면 "감지했는데도 한 번 더 전환한" 경우가 남는다.
+        guard !externalAppBlocksSwitching() else { return }
         switch decision {
         case .none: break
         case .allExhausted:
@@ -1506,6 +1598,11 @@ final class AccountsState: ObservableObject {
     // MARK: 사용자 액션
 
     func manualSwitch(to id: UUID) {
+        // 이중 writer 가드 — 수동 전환도 자동 전환과 **똑같이** 전역 자격증명을 스왑한다.
+        // 여기서 먼저 막는 이유는 아래 `preflightFallback` 이 네트워크 refresh(토큰 회전)를
+        // 하기 때문이다: 어차피 전환하지 못할 계정의 토큰을 굳이 돌려 놓을 이유가 없다.
+        // (UI 는 막힌 동안 카드를 비활성화하므로 평소엔 여기 닿지 않는다 — `AccountsView`.)
+        guard !externalAppBlocksSwitching() else { return }
         guard let provider = store.file.accounts.first(where: { $0.id == id })?.provider else { return }
         let alreadyFlagged = store.file.accounts.first { $0.id == id }?.needsReauth ?? false
         // Codex는 OAuth refresh 검증 경로가 없고, 이미 재로그인 필요로 마킹된 계정은 사용자가
@@ -1535,6 +1632,10 @@ final class AccountsState: ObservableObject {
     }
 
     private func performSwitch(to id: UUID) {
+        // 수동 전환이 실제로 자격증명을 쓰는 **관문**. `manualSwitch` 가 먼저 보지만 그 사이에
+        // `preflightFallback` 의 `await` 가 있어 그때 상대가 뜰 수 있고, 나중에 다른 호출부가
+        // 생기면 입구의 확인은 같이 따라오지 않는다 — 관문 쪽 확인이 진짜 계약이다.
+        guard !externalAppBlocksSwitching() else { return }
         let provider = store.file.accounts.first { $0.id == id }?.provider ?? .claude
         let fromID = store.file.activeByProvider[provider]
         do {
@@ -1672,7 +1773,15 @@ final class AccountsState: ObservableObject {
 
     private var loginFlow: LoginFlowController?
 
+    /// 테스트 전용 — 로그인 플로우가 떴는지. 이중 writer 가드가 계정 **추가**까지 막는지는
+    /// 이것으로만 확인할 수 있다(막지 못하면 `claude auth login` 이 실제로 실행된다).
+    var isLoginFlowActiveForTesting: Bool { loginFlow != nil }
+
     func addAccount() {
+        // 계정 추가도 라이브 자격증명을 바꾼다(`claude auth login` → adopt). 상대가 살아 있는
+        // 동안 로그인하면 상대의 reconcile 이 그 변경을 자기 쪽으로 흡수해 두 앱의 프로필이
+        // 갈라진다 — 전환과 같은 관문으로 막는다.
+        guard !externalAppBlocksSwitching() else { return }
         guard loginFlow == nil else { return } // 진행 중이면 중복 실행 방지
         // 계정 추가는 `claude auth login`으로 동작 — CLI가 없으면 설정에서 설치하도록 안내
         guard ClaudeCLI.isInstalled else {

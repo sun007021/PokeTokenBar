@@ -30,16 +30,27 @@ struct AccountsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if state.file.accounts.isEmpty {
-                emptyView
-            } else {
-                pools
-                footer
+            if state.blockedByExternalApp { externalAppNotice }
+            VStack(alignment: .leading, spacing: 10) {
+                if state.file.accounts.isEmpty {
+                    emptyView
+                } else {
+                    pools
+                    footer
+                }
             }
+            // 막힌 동안에는 전환도 계정 추가도 전부 거절된다(`AccountsState` 의 공통 관문).
+            // 컨트롤을 멀쩡히 살려 두면 눌러도 아무 일이 없어 그 자체가 고장으로 읽히므로,
+            // 위 안내와 함께 비활성으로 보여 준다 — 카드 내용은 그대로 읽을 수 있다.
+            .disabled(state.blockedByExternalApp)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onReceive(clock) { now = $0 }
         .onAppear {
+            // 팝오버를 여는 것은 사용자가 이 화면을 **지금** 보고 있다는 뜻이다 — 감시 타이머의
+            // 다음 발화를 기다리지 않고 그 자리에서 판정해, 방금 Mobius 앱을 끄고 넘어온
+            // 사용자가 낡은 안내를 보지 않게 한다.
+            state.reevaluateExternalApp()
             state.reload()
             state.refreshUsageIfStale()
             state.refreshCodexUsageIfStale()
@@ -49,6 +60,31 @@ struct AccountsView: View {
     }
 
     private var providersWithAccounts: [Provider] { state.file.providersWithAccounts }
+
+    // MARK: 이중 writer 안내
+
+    /// 기존 Mobius.app 이 실행 중이라 전환을 멈춘 상태. 에러가 아니라 **안전을 위한 정지**라서
+    /// 빨강(푸터 에러 배너)이 아닌 주황 계열로, 그리고 사라지는 배너가 아니라 상태가 풀릴
+    /// 때까지 머무는 블록으로 둔다 — 사용자가 카드를 눌러도 아무 일이 없는 이유가 늘 화면에
+    /// 있어야 한다.
+    private var externalAppNotice: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(l.accountsExternalAppTitle)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(l.accountsExternalAppBody)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+    }
 
     // MARK: 풀 목록
 

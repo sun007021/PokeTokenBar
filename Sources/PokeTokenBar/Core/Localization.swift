@@ -1129,4 +1129,23 @@ struct L {
     func accountsSettingsAdvisoryNeedsParent(_ parent: String) -> String { t("\(parent)이 켜져 있을 때만 쓸 수 있어요.", "Available only while \(parent) is on.", "\(parent)がオンのときだけ使えます。", "Solo disponible con \(parent) activado.", "Disponible uniquement si \(parent) est activé.", "Disponível apenas com \(parent) ativado.", "Nur verfügbar, wenn \(parent) aktiviert ist.") }
     /// 임계값 픽커의 접근성 라벨 — 화면에는 값(%)만 보인다.
     var accountsSettingsThreshold: String { t("전환 기준", "Threshold", "切り替え基準", "Umbral", "Seuil", "Limiar", "Schwellenwert") }
+
+    // MARK: 이중 writer 가드 (기존 Mobius.app 실행 감지)
+    // ko·en 만 번역하고 나머지 5개 슬롯에는 en 을 넣는다 — 계정 전환 기능 한정 규칙
+    // (`docs/reference/mobius-integration.md` §다국어 규칙). 이 두 문장은 **기능이 멈춘 이유**를
+    // 말한다. 없으면 사용자에게는 그냥 카드가 안 눌리는 고장으로 보인다.
+
+    var accountsExternalAppTitle: String {
+        let en = "Mobius.app is running"
+        return t("Mobius 앱이 실행 중이에요", en, en, en, en, en, en)
+    }
+    /// 왜 멈췄는지 + 어떻게 되돌리는지. "앱을 다시 켜세요"라고 하지 않는 것이 중요하다 —
+    /// Mobius 앱을 종료하면 이 앱이 스스로 재개한다.
+    var accountsExternalAppBody: String {
+        let en = "Two apps swapping the same sign-in can corrupt it, so switching is paused. "
+            + "Quit Mobius.app and it resumes on its own."
+        return t("두 앱이 같은 로그인 정보를 동시에 바꾸면 계정이 망가질 수 있어 전환을 멈췄어요. "
+                 + "Mobius 앱을 종료하면 저절로 다시 시작돼요.",
+                 en, en, en, en, en, en)
+    }
 }
