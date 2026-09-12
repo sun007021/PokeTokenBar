@@ -149,28 +149,124 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
 
 ## 단계
 
-- [ ] **Phase 0 — 안전망**: 데이터 백업(디렉터리 + UserDefaults), 포크·클론, 기준선 `swift test`
-- [ ] **Phase 1 — 엔진 이식**: `MobiusCore` + `MobiusCoreTests` 복사, `Package.swift` 배선. **UI 변화 0**
-- [ ] **Phase 2 — 경로 주입 + 마이그레이션**: `MobiusEnvironment.appSupport` 주입,
+전부 완료됐다(2026-09-12). 각 단계의 산출물은 `git log --oneline 69ff39b..` 의 `*(mobius)` 커밋들이다
+— `69ff39b` 가 이 포크가 갈라져 나온 상류 커밋이다.
+
+- [x] **Phase 0 — 안전망**: 데이터 백업(디렉터리 + UserDefaults), 포크·클론, 기준선 `swift test`
+- [x] **Phase 1 — 엔진 이식**: `MobiusCore` + `MobiusCoreTests` 복사, `Package.swift` 배선. **UI 변화 0**
+- [x] **Phase 2 — 경로 주입 + 마이그레이션**: `MobiusEnvironment.appSupport` 주입,
       기존 `~/Library/Application Support/Mobius/` → `PokeTokenBar/mobius/` 1회 **복사**(이동 아님),
       `secrets/` 0600 권한 보존 검증, 멱등성 테스트
-- [ ] **Phase 3 — 상태 계층**: `AppState` → `AccountsState`(ObservableObject 유지, sync·update 제거),
-      `LoginFlow`·`ToolInventory`·`ClaudeCLI` 이식, 토글 off 면 타이머 미생성. 유휴 CPU A/B 측정
-- [ ] **Phase 4 — 계정 탭**: `PopoverTab.accounts`, 360pt 카드 리스트 재작성
-- [ ] **Phase 5 — 설정 섹션**: 자동 전환(Claude/Codex) · 계정 추가 · 게이지 · 미리 전환 · 알림
-- [ ] **Phase 6 — 안전장치**: 이중 writer 가드(`dev.chussum.mobius` 실행 감지), 전환 시
-      `OAuthAccessTokenCache.shared.invalidate()`, 슬립 시 틱 정지
+- [x] **Phase 3 — 상태 계층**: `AppState` → `AccountsState`(ObservableObject 유지, sync·update 제거),
+      `LoginFlow`·`ToolInventory`·`ClaudeCLI` 이식, 토글 off 면 타이머 미생성
+- [x] **Phase 4 — 계정 탭**: `PopoverTab.accounts`, 360pt 카드 리스트 재작성
+- [x] **Phase 5 — 설정 섹션**: 자동 전환(Claude/Codex) · 계정 추가 · 게이지 · 미리 전환 · 알림
+- [x] **Phase 6 — 안전장치**: 이중 writer 가드(`dev.chussum.mobius` 실행 감지), 전환 시
+      `OAuthAccessTokenCache.shared.invalidate()`
       (★ **디스플레이** 슬립은 신호로 쓰지 않기로 했다 — Phase 3b 판단. 메뉴바 애니메이션과 달리
       자동 전환은 정확성 기능이라, 화면만 꺼진 채 `claude`/`codex` 세션이 계속 도는 흔한 상황에서
       틱을 멈추면 소진돼도 전환이 안 되고 사용자는 막힌 CLI 로 돌아온다. 쓴다면 **시스템** 슬립
       (`NSWorkspace.willSleepNotification`/`didWakeNotification`)이어야 하고, 깨어날 때 즉시 1틱을
       돌리는 경로가 함께 필요하다)
-- [ ] **Phase 7 — 다국어**: 계정 전환 문구 65개를 `L` 로 이관 완료(lproj·`Bundle.module` 금지).
+- [x] **Phase 7 — 다국어**: 계정 전환 문구 65개를 `L` 로 이관 완료(lproj·`Bundle.module` 금지).
       Phase 3 이 만든 임시 경유지 `Sources/PokeTokenBar/Mobius/MobiusStrings.swift` 는
       호출부가 사라져 **삭제**했다. 항목은 `Localization.swift` 의 `accountsNotify*`(알림)·
       `accountsError*`(배너·실패 사유·에러 매핑) 접두사로 모여 있고, 비-UI 계층이 `L` 을 얻는
-      방법은 아래 §다국어 규칙 참조
-- [ ] **Phase 8 — 게이트·빌드**: `test-gate.sh` 화이트리스트 갱신, 고정 서명 인증서, `/Applications` 설치
+      방법은 위 §다국어 규칙 참조
+- [x] **Phase 8 — 게이트·빌드**: `test-gate.sh` 화이트리스트 갱신, Developer ID 서명 검증.
+      `/Applications` 설치는 사용자 데이터가 걸린 비가역 작업이라 사람이 직접 한다(아래 §운영 주의사항)
+- [x] **에너지 최적화 3건**(Phase 8 과 같은 묶음): 이중 writer 감시를 폴링에서 `NSWorkspace`
+      실행/종료 알림으로, 엔진 타이머에 wakeup tolerance 부여, `claude`/`codex` 가 하나도 안 돌 때
+      세션 로그 스캔을 유휴 주기로 낮춤
+
+## 운영 주의사항
+
+이 포크를 실제로 **쓰는** 사람(= 자기 Mac 에 설치하는 사람)이 알아야 하는 것들. 위 단계 목록이
+"무엇을 만들었나"라면 이 절은 "설치하고 유지할 때 무엇이 다른가"다.
+
+### Homebrew cask 는 제거한다 (사용자 결정)
+
+상류 릴리스를 받는 `poke-token-bar` cask 와 이 포크는 **같은 번들 ID·같은 설치 경로**를 쓴다.
+cask 를 남겨 두면 `brew upgrade` 한 번에 포크가 상류 빌드로 조용히 덮어써진다.
+
+```bash
+brew uninstall --cask poke-token-bar
+```
+
+`--zap` 을 **붙이지 않는다** — `--zap` 은 `~/Library/Application Support/PokeTokenBar` 까지 지워
+도감·토큰·계정 데이터가 함께 날아간다. 위 명령은 `/Applications/PokeTokenBar.app` 만 지우고
+데이터는 그대로 둔다. 이후 업데이트는 아래 빌드 명령으로 직접 한다.
+
+### 기존 `Mobius.app` 은 제거한다 (사용자 결정)
+
+두 앱을 동시에 두면 Keychain·`~/.claude.json` 이라는 전역 자원을 양쪽이 스왑해 자격증명이
+오염된다(§이중 writer 가드). 가드가 이 앱을 물러나게 만들므로 Mobius.app 이 떠 있는 동안에는
+계정 전환이 아예 안 된다 — 남겨 둘 이유가 없다.
+
+계정 데이터는 **이미 복사돼 있다**: Phase 2 의 마이그레이션은 이동이 아니라 복사라
+`~/Library/Application Support/PokeTokenBar/mobius/` 에 사본이 있고 원본
+`~/Library/Application Support/Mobius/` 도 그대로 남아 있다. 즉 Mobius.app 을 지워도
+되돌릴 원본이 남는다.
+
+### 빌드·설치
+
+```bash
+CODESIGN_IDENTITY="Developer ID Application: Sunwook Lee (TYN557Y96W)" \
+  PTB_REQUIRE_STABLE_SIGN=1 ./scripts/build-app.sh
+```
+
+`build-app.sh` 는 마지막에 **실행 중인 앱을 `pkill` 하고 `/Applications` 를 교체한다.** 빌드만
+확인하고 싶으면 그 두 줄을 뺀 복사본을 돌려라(설치는 비가역이고 앱이 계정 데이터를 쓰고 있다).
+
+`PTB_REQUIRE_STABLE_SIGN=1` 은 인증서를 못 찾았을 때 ad-hoc 으로 조용히 내려가는 것을 막는다.
+ad-hoc 서명은 **리빌드마다 코드 정체성이 바뀌어** Keychain '항상 허용'이 매번 리셋되므로,
+계정 전환 기능에서는 고정 서명이 사실상 필수다.
+
+★ **`spctl -a -t exec` 는 이 번들을 거부한다** — `source=Unnotarized Developer ID`. Developer ID
+서명은 **공증(notarization)** 까지 받아야 Gatekeeper 정책을 통과한다. 로컬 설치에서는 문제가
+되지 않는다: Gatekeeper 의 실행 차단은 **quarantine 속성이 붙은** 번들에만 적용되고, 직접 빌드해
+`cp -R` 로 복사한 앱에는 `com.apple.quarantine` 이 붙지 않는다(붙는 건 브라우저·메일 등이 받은
+파일이다). **이 번들을 남에게 전달(다운로드 배포)하는 순간** 이야기가 달라진다 — 그때는 공증이
+필요하다. 서명 자체는 정상이다: `codesign --verify --strict` 는 `valid on disk` +
+`satisfies its Designated Requirement`, 체인은 Apple Root CA 까지 올라가고 secure timestamp 도 있다.
+
+★ 상류 cask 로 설치돼 있던 앱은 **ad-hoc 서명**(`TeamIdentifier=not set`)이다. Developer ID 빌드로
+교체하면 코드 정체성이 바뀌므로 첫 Keychain 접근에서 승인 프롬프트가 **한 번** 뜰 수 있다. 그
+다음부터는 인증서가 고정이라 다시 뜨지 않는다.
+
+### 상류 rebase
+
+`upstream` 리모트는 이미 걸려 있다(`chattymin/PokeTokenBar`).
+
+```bash
+git fetch upstream
+git rebase upstream/main          # mobius-integration 브랜치에서
+```
+
+충돌은 §코드 배치 가 정한 4곳(`Package.swift`, `UI/PopoverView.swift`, `UI/SettingsView.swift`,
+`PokeTokenBarApp.swift`)과 `Localization.swift` 에만 나야 정상이다. 그 밖에서 충돌이 나면
+격리 경계가 무너진 것이니 경계를 되돌리는 쪽으로 해결한다. `README*.md` 는 상류 파일이라
+**건드리지 않는다** — 이 포크의 문서는 이 파일이다. rebase 후에는 `./scripts/test-gate.sh`.
+
+### 버전 표기 (미적용 — 제안)
+
+`build-app.sh` 의 `VERSION` 이 상류와 같은 `2.5.3` 이라 포크인지 구분되지 않는다. 다만 **접미사를
+붙이는 흔한 방식은 이 코드베이스에서 위험하다**: `UpdateChecker.isNewer` 는 버전을 `.` 으로 쪼개
+`Int($0) ?? 0` 로 읽으므로, `2.5.3+mobius.1` 은 `[2, 5, 0, 1]` 로 해석된다(`"3+mobius"` → 0).
+그러면 **이미 나와 있는 상류 2.5.3 이 자기보다 최신으로 보여** 업데이트 배너가 상시로 뜨고,
+cask 가 설치돼 있으면 `applyUpdate()` 가 `brew upgrade --cask poke-token-bar` 를 실행해
+**포크가 상류 빌드로 덮어써진다.** `-mobius.1` 도 같은 이유로 같은 결과다.
+
+- 라벨만 바꿀 거라면 숫자 세그먼트만 써라 — `2.5.3.1`(네 번째 = 포크 빌드 번호). 비교기가
+  `[2,5,3,1]` 로 읽어 상류 2.5.3 보다 위에 놓인다.
+- **하지만 라벨로는 근본 문제가 안 풀린다.** 상류가 2.5.4 를 내는 순간 어떤 표기를 쓰든 다시
+  "업데이트 있음"이 되고, cask 가 남아 있으면 덮어쓰기가 돌아온다. 근본 대응은 둘 중 하나다:
+  (a) 위 §Homebrew cask 제거를 지키면 `brewCaskPath()` 가 nil 을 반환해 덮어쓰기 경로가 죽고
+  릴리스 페이지를 여는 것으로 끝난다(배너는 계속 뜬다), (b) `UpdateChecker.repo` 를 포크
+  저장소로 바꾸면 릴리스가 없어 `releases/latest` 가 404 → `check()` 가 조기 반환 → 배너 자체가
+  사라진다. 한 줄이고 rebase 충돌도 그 한 줄에 그친다.
+- 곁가지: 이 문자열은 `CodexRateLimitsProvider` 가 Codex MCP 핸드셰이크의 `clientInfo.version`
+  으로도 보낸다. 비-semver 문자열을 상대가 거부할 여지가 있으니 여기서도 숫자 표기가 안전하다.
 
 ## 앱 시작 순서 (`MobiusLaunchSequence`)
 
