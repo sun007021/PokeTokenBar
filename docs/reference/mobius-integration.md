@@ -1,6 +1,6 @@
 ---
 summary: Mobius(Claude·Codex 계정 전환) 기능을 PokeTokenBarExtended 에 통합하는 작업의 설계·단계·불변식.
-read_when: mobius 통합 관련 코드를 만질 때, 상류(chattymin/PokeTokenBar) 변경을 rebase 할 때, 계정 전환·자격증명 경로를 리뷰할 때
+read_when: mobius 통합 관련 코드를 만질 때, 상류(chattymin/PokeTokenBar) 변경을 가져올 때, 계정 전환·자격증명 경로를 리뷰할 때
 ---
 
 # Mobius 통합 계획
@@ -124,8 +124,6 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
 ### 일부러 안 바꾼 것
 
 - **`PTB_STATE_DIR`** — 테스트 다수가 쓰는 환경변수 이름이다. 바꾸면 전수 수정인데 얻는 것이 없다.
-- **`UpdateChecker.repo = "chattymin/PokeTokenBar"`** — 상류 릴리스를 계속 알림으로 받겠다는
-  기존 결정 그대로다(§버전 표기).
 - **`PokeTokenBar Local` 자체서명 인증서 이름**(`scripts/create-signing-cert.sh`) — 앱이 아니라
   인증서의 이름이다. 바꾸면 이미 가진 사람이 재발급해야 하고, 재발급은 코드 정체성 변경이라
   Keychain 승인 프롬프트를 한 번 더 부른다.
@@ -133,7 +131,7 @@ Tests/MobiusCoreTests/           # 통째 복사, 무수정
   등 `Localization.swift`) — 표시 이름은 "PokeTokenBar Extended" 라 여전히 읽힌다. 7개 언어
   카피 수정은 별도 결정으로 남긴다.
 - **`mobius.` UserDefaults 키 접두사**, `MobiusCore`·`MobiusCoreTests` 타깃 이름.
-- **`CONTRIBUTING*.md`·`README.ja.md`** — 상류 파일이라 건드리지 않는다(§상류 rebase).
+- **`CONTRIBUTING*.md`·`README.ja.md`** — 상류 파일이라 건드리지 않는다(§상류 변경 가져오기).
 
 ### 세 갈래 이전 (첫 실행에 자동)
 
@@ -344,113 +342,75 @@ ad-hoc 서명은 **리빌드마다 코드 정체성이 바뀌어** Keychain '항
 교체하면 코드 정체성이 바뀌므로 첫 Keychain 접근에서 승인 프롬프트가 **한 번** 뜰 수 있다. 그
 다음부터는 인증서가 고정이라 다시 뜨지 않는다.
 
-### 상류 rebase
+### 버전 표기 — 독자 버전 `1.0.0` (2026-09-15, 사용자 결정)
 
-`upstream` 리모트는 이미 걸려 있다(`chattymin/PokeTokenBar`).
+PokeTokenBar Extended 는 상류와 **별개로 1.0.0 부터** 버전을 매긴다. 옛 표기 `2.5.3+mobius.1`
+(상류 기준점 + 포크 빌드 번호)은 은퇴했다. 그 표기는 포크와 상류가 **같은 번들 ID·같은 설치
+경로**를 쓰던 시절 둘을 구분하는 유일한 신호였는데, 개명(§개명과 데이터 이전)으로 그 전제가
+사라졌다.
+
+| 자리 | 값 |
+|---|---|
+| `scripts/build-app.sh` | `VERSION="1.0.0"` 한 줄 — 유일한 정의 지점. `CFBundleShortVersionString`·`CFBundleVersion` 둘 다 이 값 |
+| 태그 | `vX.Y.Z`, 주석 `PokeTokenBar Extended X.Y.Z` (`release.sh` 가 이 주석으로 자기 태그를 찾는다) |
+| 업데이트 배너 | `UpdateChecker.releaseRepo = "sun007021/PokeTokenBar"` — **이 저장소의 릴리스만 본다** |
+
+★ **배너가 상류를 보면 안 된다.** 1.x 에서 상류 2.x 를 보면 늘 "새 버전"이라 배너가 상시로 뜬다.
+그래서 "상류 릴리스 알림을 계속 받는다"던 옛 결정도 함께 폐기됐다 — 상류 변경은 사람이 `git fetch
+upstream` 으로 확인한다. `UpdateCheckerTests.testChecksThisAppsOwnReleasesBecauseUpstreamVersionsAlwaysLookNewer`
+가 전제(2.5.4 > 1.0.0)와 결론(조회 대상)을 함께 잠근다.
+
+★ **옛 `2.5.3+mobius.N` 설치본은 1.0.0 배너를 받지 못한다** — `isNewer("1.0.0", than: "2.5.3+mobius.1")`
+은 거짓이다. 그 빌드는 공개 릴리스로 나간 적이 없고(로컬 빌드뿐) 사용자 한 명이라, 1.0.0 DMG 로 한 번
+수동 교체하는 것으로 정리한다. 코드로 우회하지 않는다.
+
+`isNewer` 가 `+`(빌드 메타데이터)·`-`(프리릴리스) 뒤를 잘라내는 `precedenceParts` 는 그대로 둔다 —
+semver 우선순위 규칙과 같고, 로컬 빌드 표기가 붙어도 판정이 흔들리지 않는다.
+
+`CodexRateLimitsProvider` 가 이 값을 Codex MCP 핸드셰이크의 `clientInfo.version` 으로 보낸다 —
+`1.0.0` 은 평범한 semver 라 문제없다.
+
+### 상류 변경 가져오기
+
+`upstream` 리모트는 이미 걸려 있다(`chattymin/PokeTokenBar`). 이 저장소의 `main` 은 이미 origin 에
+공개돼 있으므로 rebase(강제 push 필요) 대신 **필요한 커밋만 cherry-pick 하거나 merge** 한다
+(v2.5.4 반영 때 #290·#292·#293·#295 만 골라 cherry-pick 했다).
 
 ```bash
 git fetch upstream
-git rebase upstream/main          # mobius-integration 브랜치에서
+git log --oneline HEAD..upstream/main           # 새 커밋 확인
+git merge-tree --write-tree --name-only HEAD upstream/main   # 작업트리 안 건드리고 충돌 미리보기
+git cherry-pick <sha>...                        # 또는 git merge upstream/main
+./scripts/test-gate.sh
 ```
+
+★ **상류에서 새로 생긴 파일은 옛 경로로 들어온다.** git 이 개명된 디렉터리로 옮겨 주긴 하지만
+(`CONFLICT (file location)` 로 표시) 파일 **내용**의 `@testable import PokeTokenBar` 와
+`"Sources/PokeTokenBar/..."` 경로 문자열은 그대로라 컴파일·테스트가 깨진다. 새 파일마다
+`PokeTokenBarExtended` 로 바꾼다.
 
 충돌은 §코드 배치 가 정한 4곳(`Package.swift`, `UI/PopoverView.swift`, `UI/SettingsView.swift`,
-`PokeTokenBarExtendedApp.swift`)과 `Localization.swift` 에만 나야 정상이다. 그 밖에서 충돌이 나면
-격리 경계가 무너진 것이니 경계를 되돌리는 쪽으로 해결한다. `README*.md` 는 상류 파일이라
-**건드리지 않는다** — 이 포크의 문서는 이 파일이다. rebase 후에는 `./scripts/test-gate.sh`.
+`PokeTokenBarExtendedApp.swift`)과 `Localization.swift`, 그리고 이 저장소가 고친 스크립트
+(`build-app.sh`·`release.sh`·`test-gate.sh`)에서 난다. `build-app.sh` 의 버전은 상류 버전과 무관하니
+**이쪽 값을 유지**하고, `test-gate.sh` 는 양쪽 파일 목록을 합친다. `README.md`·`README.ko.md` 는 이
+앱의 설치 문서라 이쪽을 유지한다(`README.ja.md` 는 상류 파일 그대로).
 
-rebase 로 기준점이 올라갔으면 `scripts/build-app.sh` 의 `UPSTREAM_VERSION` 을 새 상류 버전으로
-올리고 `FORK_BUILD` 를 `1` 로 되돌린다 (§버전 표기). 빠뜨리면 표시 버전이 옛 상류 기준점에
-머물러 상류 릴리스 알림이 이미 반영한 버전에도 계속 뜬다.
-
-### 버전 표기 — `2.5.3+mobius.1`
-
-포크 빌드와 상류 빌드가 **같은 번들 ID·같은 설치 경로**를 쓰기 때문에, 화면에 뜨는 버전이 둘을
-구분하는 유일한 신호다. 표기 규칙은 `scripts/build-app.sh` 머리의 **두 변수 하나뿐**이다.
-
-| 키 | 값 | 왜 그 모양인가 |
-|---|---|---|
-| `CFBundleShortVersionString` | `$UPSTREAM_VERSION+mobius.$FORK_BUILD` = `2.5.3+mobius.1` | 표시·업데이트 비교용. 설정창 푸터와 업데이트 배너("🆕 v2.5.4 available (you have **2.5.3+mobius.1**)")에 그대로 나와 **결정 시점에** 포크임이 보인다 |
-| `CFBundleVersion` | `$UPSTREAM_VERSION.$FORK_BUILD` = `2.5.3.1` | LaunchServices 가 같은 번들 ID 의 중복 사본 중 무엇을 띄울지 고를 때 비교하는 키 — 여기는 숫자만 두고, 네 번째 세그먼트(포크 빌드 번호)가 상류 2.5.3 보다 위에 놓이게 한다 |
-
-**상류를 rebase 해 기준점이 올라가면** `UPSTREAM_VERSION` 을 그 버전으로 올리고 `FORK_BUILD` 를
-`1` 로 되돌린다. 포크 쪽만 다시 빌드하면 `FORK_BUILD` 만 올린다.
-
-#### Apple 규격 — 실측 (2026-09-12, 추측 아님)
-
-`CFBundleShortVersionString` 은 문서상 "마침표로 구분된 정수"를 기대하므로 `+` 가 어디서
-깨지는지 **실제로 번들을 만들어** 확인했다. 깨지는 곳이 없었다:
-
-| 검사 | 결과 |
-|---|---|
-| `plutil -lint Info.plist` | OK |
-| `codesign -s "Developer ID Application: …"` | 서명 성공 |
-| `codesign --verify --strict` | `valid on disk` + `satisfies its Designated Requirement` (Apple Root CA 체인 + secure timestamp) |
-| `defaults read …/Info.plist` · `PlistBuddy -c Print` | `2.5.3+mobius.1` 그대로 |
-| `Bundle.main.object(forInfoDictionaryKey:)` / `infoDictionary` | `2.5.3+mobius.1` 그대로 — 같은 두 키·같은 Developer ID 서명을 가진 별도 번들을 만들어 그 안에서 실행해 확인했다(메뉴바 앱은 띄우면 라이브 계정 데이터를 건드리므로 격리 번들로 봤다) |
-
-규격을 **집행하는** 곳은 App Store 심사이고 이 포크는 거기로 가지 않는다. 로컬 Gatekeeper 는
-버전 문자열을 보지 않는다(§빌드·설치의 quarantine 설명 참조).
-
-★ **`2.5.3.1`(네 자리 숫자)보다 `2.5.3+mobius.1` 이 나은 두 번째 이유**: 이 문자열은
-`CodexRateLimitsProvider` 가 Codex MCP 핸드셰이크의 `clientInfo.version` 으로도 보낸다.
-`2.5.3+mobius.1` 은 **유효한 semver**(빌드 메타데이터)이고 `2.5.3.1` 은 semver 가 아니다 —
-상대가 검증한다면 `+` 쪽이 오히려 안전하다(이 문서의 옛 판 추정과 반대다. 실제 핸드셰이크로
-확인하지는 않았다 — `codex app-server` 를 띄우면 실행 중 세션이 토큰을 회전시킬 수 있어
-건드리지 않았다).
-
-#### `UpdateChecker.isNewer` 를 함께 고쳤다
-
-구 비교기는 버전을 `.` 으로 쪼개 `Int($0) ?? 0` 으로 읽었다. `2.5.3+mobius.1` 은 `"3+mobius"` 가
-0 이 되어 `[2, 5, 0, 1]` 로 읽히고, **이미 나와 있는 상류 2.5.3 이 자기보다 최신으로 보여**
-업데이트 배너가 상시로 떴다. 지금은 `precedenceParts` 가 `+`(빌드 메타데이터)·`-`(프리릴리스)
-뒤를 잘라내고 숫자 세그먼트만 비교한다 — semver 가 우선순위에서 그 둘을 제외하는 것과 같다.
-
-- 상류 `2.5.3` → 동일 → 배너 없음
-- 상류 `2.5.4` → **새 버전 → 배너 뜸** (상류 변경을 계속 알림으로 받겠다는 사용자 결정)
-- `FORK_BUILD` 를 올려도 판정은 `+` 앞만 본다
-
-`UpdateCheckerTests` 의 `testFork*`·`testPreRelease*` 가 양방향으로 잠근다 — 고치기 전 구현에
-되돌려 실제로 빨간불이 되는지 확인하고 넣었다. "비교를 아예 죽여서" 통과하는 구현도 걸리게
-**상류 2.5.4 가 여전히 새 버전으로 잡히는지**를 같은 묶음에서 단언한다.
-
-### 상류 릴리스 알림이 떴을 때 (덮어쓰기 금지)
-
-배너의 **업데이트 버튼을 눌러 받은 상류 zip 으로는 이 앱이 갱신되지 않는다.** 개명 이후
-상류 빌드는 다른 번들 ID·다른 설치 경로의 **별개 앱**이라, 받아서 `/Applications` 에 넣으면
-이 앱은 그대로 둔 채 메뉴바 아이콘만 하나 늘어난다(개명 전에는 같은 자리를 덮어써 계정 전환
-기능이 통째로 사라졌다 — 그건 더 이상 일어나지 않는다). 올바른 갱신은 여전히 rebase 다:
-
-```bash
-git fetch upstream
-git rebase upstream/main          # mobius-integration 브랜치에서
-./scripts/test-gate.sh
-# build-app.sh: UPSTREAM_VERSION 을 새 상류 버전으로, FORK_BUILD 를 1 로
-CODESIGN_IDENTITY="Developer ID Application: Sunwook Lee (TYN557Y96W)" \
-  PTB_REQUIRE_STABLE_SIGN=1 ./scripts/build-app.sh
-```
+상류 앱은 다른 번들 ID·다른 설치 경로의 **별개 앱**이다 — 상류 릴리스를 받아 설치해도 이 앱은
+갱신되지 않고 메뉴바 아이콘만 하나 늘어난다.
 
 **자동 덮어쓰기 경로는 코드에서 닫아 두었다** — `UpdateChecker.allowsBrewCaskUpgrade = false`.
-개명으로 설치 경로가 갈려 이 분기는 이제 이 앱을 덮지 못하지만, 되돌리지 않는다: 앱을 종료하고
-남의 번들을 건드리는 동작 자체가 이 포크가 할 일이 아니다.
 `applyUpdate()` 의 brew 분기는 확인창 **하나 없이** 앱을 종료하고 `brew upgrade --cask
-poke-token-bar` 로 번들을 교체한다. 지금은 사용자가 cask 를 지워 `brewCaskPath()` 가 nil 이지만
-한 번이라도 재설치되면 그 경로가 되살아나므로, 우연한 상태가 아니라 코드가 막게 했다
-(`testForkNeverTakesTheBrewCaskUpgradePath`). 남는 경로는 릴리스 페이지를 여는 것뿐이고,
-거기서부터는 사람이 zip 을 받아 직접 교체해야 하는 의식적인 행동이다.
+poke-token-bar` 로 상류 앱을 설치한다. cask 가 한 번이라도 설치돼 있으면 그 경로가 되살아나므로
+코드가 막게 했다(`testForkNeverTakesTheBrewCaskUpgradePath`). 배너의 업데이트 버튼은 이 저장소의
+릴리스 페이지를 열 뿐이다.
 
-★ **배너에 경고 문구를 더하지 않기로 했다**(판단 근거): 배너는 이미 `you have
-2.5.3+mobius.1` 로 포크임을 그 자리에서 말하고 있어 정보는 중복이다. 반면 배너는 폭이 좁은
-`HStack`(Text + Spacer + 버튼 2개) 이라 줄을 더하면 레이아웃이 바뀌는데, 메뉴바 팝오버는
-띄워서 눈으로 확인할 수 없는 표면이라(앱을 띄우면 라이브 계정 데이터를 건드린다) 회귀를
-검증할 수 없다. 상류와 공유하는 파일이라 rebase 충돌 면적도 늘어난다. **자동** 덮어쓰기를
-코드로 닫고, **수동** 덮어쓰기는 이 문서의 위 절차로 막는 쪽이 비용 대비 방어가 크다.
+### 배포 — 서명·공증·DMG (`release.sh`)
 
-### `release.sh` 는 이 포크에서 돌지 않는다
-
-`release.sh` 는 **상류 저장소**로 배포하며(`REPO`/`TAP_REPO` = `chattymin/*`), 3/8 단계의 범프가
-`VERSION="..."` 를 평평한 리터럴로 덮어써 위 두 변수 표기를 조용히 지운다. `FORK_BUILD=` 가
-있으면 즉시 중단하는 가드를 스크립트 앞에 뒀다(가드가 없으면 `PREV` grep 이 `+` 때문에 매치에
-실패해 `set -e` 로 아무 설명 없이 죽는다). `--check-only` 는 여전히 쓸 수 있다.
+절차는 `docs/reference/release-workflow.md` §PokeTokenBar Extended 릴리스. 요지만:
+Developer ID 서명(hardened runtime + secure timestamp) → 앱 공증·staple → DMG 생성·서명·공증·staple
+→ 태그·push → GitHub Release 에 `PokeTokenBarExtended.dmg` + `.zip` 첨부. README 의 다운로드 링크는
+`releases/latest/download/PokeTokenBarExtended.dmg` 라 **자산 파일 이름이 곧 링크**다 — 이름을 바꾸면
+링크가 404 가 된다(`release.sh` 문서 검토가 README 에 그 링크가 있는지 본다).
 
 ### Mobius 본체(`chussum/mobius`)의 변경을 가져올 때
 

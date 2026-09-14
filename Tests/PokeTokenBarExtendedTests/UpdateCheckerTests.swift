@@ -27,34 +27,27 @@ final class UpdateCheckerTests: XCTestCase {
 
     // MARK: - Detached upgrade script wait loop (#175)
 
-    // MARK: 포크 버전 표기 (`2.5.3+mobius.1`)
+    // MARK: 독자 버전 (1.0.0 부터, 2026-09-15)
 
-    /// 이 포크의 표시 버전은 semver 빌드 메타데이터를 단다. 비교기가 그걸 그대로 `.` 으로
-    /// 쪼개면 `"3+mobius"` → 0 이라 `[2, 5, 0, 1]` 이 되고, **이미 나와 있는 상류 2.5.3 이
-    /// 자기보다 최신으로 보여** 업데이트 배너가 상시로 뜬다. 그 정확한 조건을 잠근다.
-    func testForkBuildIsNotOlderThanTheUpstreamReleaseItWasForkedFrom() {
-        XCTAssertFalse(UpdateChecker.isNewer("2.5.3", than: "2.5.3+mobius.1"))
+    /// 이 앱은 상류와 별개로 1.0.0 부터 버전을 매긴다. 배너가 상류 저장소를 보면 상류 2.x 가
+    /// 늘 새 버전으로 판정돼 배너가 상시로 뜬다 — 그 전제(상류 2.x > 1.x)와, 그래서 조회
+    /// 대상이 이 앱의 저장소여야 한다는 결론을 함께 잠근다.
+    func testChecksThisAppsOwnReleasesBecauseUpstreamVersionsAlwaysLookNewer() {
+        XCTAssertTrue(UpdateChecker.isNewer("2.5.4", than: "1.0.0"))
+        XCTAssertEqual(UpdateChecker.releaseRepo, "sun007021/PokeTokenBar")
     }
 
-    /// 표기를 바꾼 뒤에도 **상류 릴리스 알림은 계속 받는다**(사용자 결정). 위 테스트만 있으면
-    /// "비교를 아예 죽여서" 통과시키는 구현도 초록불이라, 반대 방향을 함께 못 박는다.
-    func testForkBuildStillSeesANewerUpstreamRelease() {
-        XCTAssertTrue(UpdateChecker.isNewer("2.5.4", than: "2.5.3+mobius.1"))
-        XCTAssertTrue(UpdateChecker.isNewer("2.6.0", than: "2.5.3+mobius.1"))
-        XCTAssertTrue(UpdateChecker.isNewer("3.0.0", than: "2.5.3+mobius.1"))
-    }
-
-    /// 포크 빌드 번호가 올라가도 판정은 상류 기준점(`+` 앞)만 본다 — 빌드 번호를 올렸다고
-    /// 상류 릴리스가 가려지면 알림을 계속 받겠다는 결정이 조용히 깨진다.
-    func testForkBuildNumberDoesNotAffectUpstreamComparison() {
-        XCTAssertTrue(UpdateChecker.isNewer("2.5.4", than: "2.5.3+mobius.9"))
-        XCTAssertFalse(UpdateChecker.isNewer("2.5.3", than: "2.5.3+mobius.9"))
+    /// semver 빌드 메타데이터(`+…`)는 우선순위에서 제외된다. `.` 으로 그냥 쪼개면
+    /// `"0+local"` → 0 이 되어 판정이 흔들린다.
+    func testBuildMetadataIsIgnoredWhenComparing() {
+        XCTAssertFalse(UpdateChecker.isNewer("1.0.0", than: "1.0.0+local.1"))
+        XCTAssertTrue(UpdateChecker.isNewer("1.0.1", than: "1.0.0+local.9"))
     }
 
     /// 프리릴리스 접미사도 같은 규칙으로 잘린다(semver §9 — 우선순위에서 제외).
     func testPreReleaseSuffixIsStrippedBeforeComparing() {
-        XCTAssertFalse(UpdateChecker.isNewer("2.5.3-rc1", than: "2.5.3"))
-        XCTAssertTrue(UpdateChecker.isNewer("2.5.4-rc1", than: "2.5.3+mobius.1"))
+        XCTAssertFalse(UpdateChecker.isNewer("1.0.0-rc1", than: "1.0.0"))
+        XCTAssertTrue(UpdateChecker.isNewer("1.0.1-rc1", than: "1.0.0"))
     }
 
     /// 상류 cask 업그레이드는 확인창 없이 앱을 종료하고 번들을 상류 빌드로 교체한다(같은 번들

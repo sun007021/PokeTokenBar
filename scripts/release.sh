@@ -77,38 +77,46 @@ CHECK
   return $warn
 }
 
-# 포크(mobius) 전용 문서 검토. 상류 doc_check 를 그대로 쓰면 안 되는 이유:
-# README*·assets·랜딩·cask 는 **상류 표면**이고 이 포크는 그것들을 유지하지 않는다
-# (docs/reference/mobius-integration.md §상류 rebase: "README*.md 는 상류 파일이라 건드리지
-# 않는다"). 특히 `feat:` 하드 게이트는 포크 커밋 대부분이 UI 를 건드리므로 모든 포크
-# 릴리스를 막아 버린다. 포크의 문서 표면은 mobius-integration.md 하나다.
+# PokeTokenBar Extended 전용 문서 검토. 상류 doc_check 를 그대로 쓰면 안 되는 이유:
+# 상류의 assets·랜딩·cask 게이트는 이 저장소가 유지하지 않는 표면이고, 특히 `feat:` 하드
+# 게이트는 이 앱 커밋 대부분이 UI 를 건드리므로 모든 릴리스를 막아 버린다.
+# 이 앱의 문서 표면은 README.md·README.ko.md(설치·다운로드)와 mobius-integration.md 다.
 fork_doc_check() {
-  local warn=0 last_tag src_changed doc_changed
-  echo "▶ 문서 일관성 검토 (포크)"
-  last_tag=$(git describe --tags --match 'v*+mobius.*' --abbrev=0 2>/dev/null || echo "")
+  local warn=0 last_tag src_changed doc_changed f
+  echo "▶ 문서 일관성 검토 (PokeTokenBar Extended)"
+  # 상류에서 넘어온 v2.x 태그가 같은 저장소에 섞여 있다 — 이 스크립트가 만든 태그만 고른다
+  # (태그 주석에 "PokeTokenBar Extended" 를 넣는다).
+  last_tag=$(git tag -l 'v*' -n1 --sort=-v:refname | awk '/PokeTokenBar Extended/ {print $1; exit}')
   if [[ -n "$last_tag" ]]; then
     src_changed=$(git diff --name-only "$last_tag"..HEAD -- 'Sources/' 2>/dev/null)
     doc_changed=$(git diff --name-only "$last_tag"..HEAD -- 'docs/reference/mobius-integration.md' 2>/dev/null)
     if [[ -n "$src_changed" && -z "$doc_changed" ]]; then
       echo "  ⚠ $last_tag 이후 Sources/ 가 바뀌었는데 docs/reference/mobius-integration.md 는 그대로입니다."
-      echo "     → 동작·경로·불변식이 바뀌었으면 그 문서를 먼저 갱신하세요(포크의 유일한 문서 표면)."
+      echo "     → 동작·경로·불변식이 바뀌었으면 그 문서를 먼저 갱신하세요."
       warn=1
     fi
   else
-    echo "  · 이전 포크 태그 없음 — 첫 포크 릴리스로 간주."
+    echo "  · 이전 PokeTokenBar Extended 태그 없음 — 첫 릴리스로 간주."
   fi
+  # README 의 "최신 DMG" 링크는 자산 파일 이름에 묶여 있다 — 이름이 어긋나면 404 가 된다.
+  for f in README.md README.ko.md; do
+    grep -qF "releases/latest/download/$APP_NAME.dmg" "$f" || {
+      echo "  ⚠ $f 에 최신 DMG 다운로드 링크(releases/latest/download/$APP_NAME.dmg)가 없습니다."
+      warn=1; }
+  done
   cat <<'CHECK'
-  ─ 수동 체크리스트 (포크) ──────────────────────────────────────────
-   [ ] docs/reference/mobius-integration.md : 버전 표기·빌드/설치·운영 주의사항
-   [ ] 상류 표면(README*/assets/랜딩/cask)은 **갱신 대상이 아니다** — 상류 파일이다
-   [ ] 인앱 업데이트 배너는 상류 릴리스만 본다 → 이 릴리스는 배너로 전달되지 않는다
+  ─ 수동 체크리스트 ──────────────────────────────────────────────────
+   [ ] README.md / README.ko.md : 설치·기능·요구사항 (다운로드 링크는 위에서 자동 검사)
+   [ ] docs/reference/mobius-integration.md : 버전·빌드/배포·운영 주의사항
+   [ ] README.ja.md·assets·랜딩·cask 는 상류 표면이다 — 갱신 대상 아님
   ─────────────────────────────────────────────────────────────────
 CHECK
   return $warn
 }
 
+# 이 체크아웃이 PokeTokenBar Extended 인가 — 산출물 이름(build-app.sh 의 APP_NAME)이 단일 진실이다.
 IS_FORK=0
-grep -q '^FORK_BUILD=' scripts/build-app.sh && IS_FORK=1
+grep -q '^APP_NAME="PokeTokenBarExtended"$' scripts/build-app.sh && IS_FORK=1
 
 # 산출물 이름은 build-app.sh 의 APP_NAME 이 단일 진실이다 — 여기서 다시 적으면 개명 때 조용히
 # 어긋나고(실제로 어긋났다), 릴리스가 "빌드는 됐는데 zip 대상이 없다"로 죽는다.
@@ -121,84 +129,101 @@ if [[ "${1:-}" == "--check-only" ]]; then
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 포크(mobius) 릴리스 경로
+# PokeTokenBar Extended 릴리스 경로 — 서명 → 공증 → DMG → GitHub Release
 # ──────────────────────────────────────────────────────────────────────────────
 if [[ $IS_FORK -eq 1 ]]; then
-  FORK_BRANCH="${PTB_RELEASE_BRANCH:-mobius-integration}"
+  RELEASE_BRANCH="${PTB_RELEASE_BRANCH:-main}"
+  NOTARY_PROFILE="${PTB_NOTARY_PROFILE:-PokeTokenBarExtended}"
+  VOLUME_NAME="PokeTokenBar Extended"
+  APP="build/$APP_NAME.app"
+  ZIP="build/$APP_NAME.zip"
+  DMG="build/$APP_NAME.dmg"
 
   usage_fork() {
     cat <<'USAGE' >&2
-사용 (포크):
-  ./scripts/release.sh                     # FORK_BUILD 만 +1 (평소 포크 릴리스)
-  ./scripts/release.sh --upstream 2.5.4    # 상류 rebase 후: UPSTREAM_VERSION 갱신 + FORK_BUILD=1
+사용 (PokeTokenBar Extended):
+  ./scripts/release.sh 1.2.0              # 버전 명시
+  ./scripts/release.sh patch|minor|major  # 현재 VERSION 기준 세그먼트 올림
 
-  PTB_NOTES_FILE=/tmp/notes.md ./scripts/release.sh   # 릴리스 노트 본문(설치 안내는 자동 첨부)
+  필수: CODESIGN_IDENTITY="Developer ID Application: … (TEAMID)"
+  공증: xcrun notarytool store-credentials PokeTokenBarExtended --apple-id <id> --team-id <TEAMID>
+        (프로필 이름이 다르면 PTB_NOTARY_PROFILE)
+  선택: PTB_NOTES_FILE=/tmp/notes.md      # 릴리스 노트 본문 — 설치 안내는 자동 첨부
 USAGE
     exit 1
   }
 
-  NEW_UPSTREAM=""
+  # $1 을 공증 서비스에 올리고 Accepted 가 아니면 실패한다. `--wait` 의 종료 코드만 믿지 않고
+  # JSON status 를 본다 — Invalid 판정도 "제출·대기는 성공"으로 끝날 수 있다.
+  notarize() {
+    local file="$1" out status id
+    out=$(xcrun notarytool submit "$file" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json 2>&1) || true
+    status=$(printf '%s' "$out" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || echo "")
+    id=$(printf '%s' "$out" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))' 2>/dev/null || echo "")
+    if [[ "$status" != "Accepted" ]]; then
+      echo "✗ 공증 실패: $file (status='${status:-?}')"
+      printf '%s\n' "$out" | sed 's/^/    /'
+      [[ -n "$id" ]] && echo "  원인: xcrun notarytool log $id --keychain-profile $NOTARY_PROFILE"
+      return 1
+    fi
+    echo "  ✓ 공증 통과: $file ($id)"
+  }
+
+  CUR_VERSION=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' scripts/build-app.sh)
+  [[ "$CUR_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "✗ build-app.sh 의 VERSION 을 읽지 못했습니다: '$CUR_VERSION'"; exit 1; }
+  IFS=. read -r MAJ MIN PAT <<< "$CUR_VERSION"
   case "${1:-}" in
-    "")           : ;;
-    --upstream)   NEW_UPSTREAM="${2:?--upstream 뒤에 상류 버전(예: 2.5.4)}" ;;
-    -h|--help)    usage_fork ;;
-    *)            echo "✗ 알 수 없는 인자: $1" >&2; usage_fork ;;
+    ""|-h|--help) usage_fork ;;
+    patch) VERSION="$MAJ.$MIN.$((PAT + 1))" ;;
+    minor) VERSION="$MAJ.$((MIN + 1)).0" ;;
+    major) VERSION="$((MAJ + 1)).0.0" ;;
+    *)     VERSION="$1" ;;
   esac
-
-  CUR_UPSTREAM=$(sed -n 's/^UPSTREAM_VERSION="\(.*\)"$/\1/p' scripts/build-app.sh)
-  CUR_FORK=$(sed -n 's/^FORK_BUILD="\(.*\)"$/\1/p' scripts/build-app.sh)
-  [[ -n "$CUR_UPSTREAM" && -n "$CUR_FORK" ]] || {
-    echo "✗ build-app.sh 에서 UPSTREAM_VERSION/FORK_BUILD 를 읽지 못했습니다 (표기 규칙이 바뀌었나?)"; exit 1; }
-
-  if [[ -n "$NEW_UPSTREAM" ]]; then
-    [[ "$NEW_UPSTREAM" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "✗ 상류 버전 형식 오류: $NEW_UPSTREAM"; exit 1; }
-    TO_UPSTREAM="$NEW_UPSTREAM"; TO_FORK="1"
-  else
-    [[ "$CUR_FORK" =~ ^[0-9]+$ ]] || { echo "✗ FORK_BUILD 가 정수가 아닙니다: $CUR_FORK"; exit 1; }
-    TO_UPSTREAM="$CUR_UPSTREAM"; TO_FORK="$((CUR_FORK + 1))"
-  fi
-  PREV_VERSION="$CUR_UPSTREAM+mobius.$CUR_FORK"
-  VERSION="$TO_UPSTREAM+mobius.$TO_FORK"
+  [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "✗ 버전 형식 오류: $VERSION" >&2; usage_fork; }
   TAG="v$VERSION"
 
   [[ -n "$REPO" ]] || { echo "✗ origin 에서 owner/repo 를 못 읽었습니다 — PTB_RELEASE_REPO 로 지정하세요."; exit 1; }
   [[ "$REPO" != "$UPSTREAM_SLUG" ]] || {
-    echo "✗ 포크 빌드인데 배포 대상이 상류($UPSTREAM_SLUG)입니다 — origin 을 확인하세요."; exit 1; }
+    echo "✗ PokeTokenBar Extended 빌드인데 배포 대상이 상류($UPSTREAM_SLUG)입니다 — origin 을 확인하세요."; exit 1; }
 
   BRANCH=$(git rev-parse --abbrev-ref HEAD)
-  [[ "$BRANCH" == "$FORK_BRANCH" ]] || {
-    echo "✗ $FORK_BRANCH 브랜치에서 실행하세요 (현재: $BRANCH) — 커밋/push/태그 대상 일치 보장"; exit 1; }
+  [[ "$BRANCH" == "$RELEASE_BRANCH" ]] || {
+    echo "✗ $RELEASE_BRANCH 브랜치에서 실행하세요 (현재: $BRANCH) — 커밋/push/태그 대상 일치 보장"; exit 1; }
 
-  # 작업트리가 더러우면 중단한다. 상류 경로에 없는 게이트인데 포크에서 필요한 이유:
-  # 범프 커밋이 `git add scripts/build-app.sh` 로 좁게 스테이징돼도, 이미 스테이징된
-  # 남의 변경이 있으면 그대로 릴리스 커밋에 딸려 들어간다.
+  # 작업트리가 더러우면 중단한다: 범프 커밋이 `git add scripts/build-app.sh` 로 좁게 스테이징돼도
+  # 이미 스테이징된 남의 변경이 있으면 그대로 릴리스 커밋에 딸려 들어간다.
   [[ -z "$(git status --porcelain)" ]] || {
     echo "✗ 작업트리가 깨끗하지 않습니다 — 릴리스 커밋에 관계없는 변경이 딸려 들어갑니다:"
     git status --short | sed 's/^/    /'
     exit 1; }
 
-  if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    echo "✗ 태그 $TAG 가 이미 로컬에 있습니다."; exit 1
+  # 상류에서 넘어온 v2.x 태그가 origin 에 남아 있다 — 로컬뿐 아니라 원격도 본다.
+  if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
+     || git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+    echo "✗ 태그 $TAG 가 이미 있습니다(로컬 또는 origin)."; exit 1
   fi
 
-  echo "=== PokeTokenBar(mobius 포크) 릴리스 $PREV_VERSION → $VERSION ==="
-  echo "    저장소: $REPO   브랜치: $FORK_BRANCH   태그: $TAG"
+  echo "=== PokeTokenBar Extended 릴리스 $CUR_VERSION → $VERSION ==="
+  echo "    저장소: $REPO   브랜치: $RELEASE_BRANCH   태그: $TAG"
 
-  echo "▶ 1/7 릴리스 전 테스트 게이트"
+  echo "▶ 1/9 릴리스 전 테스트 게이트"
   ./scripts/test-gate.sh >/dev/null || { echo "✗ test-gate 실패 — 중단"; exit 1; }
   echo "  ✓ 통과"
 
-  echo "▶ 2/7 문서 검토"
+  echo "▶ 2/9 문서 검토"
   doc_rc=0; fork_doc_check || doc_rc=$?
   if [[ $doc_rc -ne 0 ]]; then
     read -r -p "  문서 경고가 있습니다. 그래도 계속? [y/N] " a
     [[ "$a" == "y" || "$a" == "Y" ]] || { echo "중단 — 문서 먼저 갱신하세요."; exit 1; }
   fi
 
-  echo "▶ 3/7 코드서명 신원 게이트"
+  echo "▶ 3/9 서명·공증 자격 게이트"
   # ad-hoc 서명은 리빌드마다 코드 정체성이 바뀌어 사용자 Keychain '항상 허용'이 매번
-  # 리셋된다 — 계정 전환 기능이 Keychain 을 쓰므로 고정 서명이 사실상 필수다.
+  # 리셋되고, 공증은 Developer ID 서명만 받는다 — 배포 자산은 Developer ID 로만 만든다.
   SIGN_IDENTITY="${CODESIGN_IDENTITY:?CODESIGN_IDENTITY 를 지정하세요 (예: \"Developer ID Application: … (TEAMID)\")}"
+  [[ "$SIGN_IDENTITY" == "Developer ID Application:"* ]] || {
+    echo "✗ 공증하려면 Developer ID Application 인증서가 필요합니다: '$SIGN_IDENTITY'"; exit 1; }
   LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" '$0 ~ id {print $2; exit}')
   [[ -n "$LEAF" ]] || { echo "✗ 유효 codesigning identity '$SIGN_IDENTITY' 없음(미설치·만료 포함)."; exit 1; }
   LEAF_PIN="scripts/fork-signing-leaf.txt"
@@ -215,72 +240,103 @@ USAGE
     echo "      echo $LEAF > $LEAF_PIN && git add $LEAF_PIN"
   fi
   echo "  ✓ '$SIGN_IDENTITY' leaf=$LEAF"
-  export PTB_REQUIRE_STABLE_SIGN=1   # build-app.sh 방어선: ad-hoc 폴백으로 새면 즉시 실패
+  # 공증 자격은 빌드 전에 확인한다 — 몇 분짜리 빌드 뒤에 "프로필 없음"으로 죽지 않게.
+  xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 || {
+    echo "✗ 공증 자격 프로필 '$NOTARY_PROFILE' 을 쓸 수 없습니다. 한 번 저장하세요:"
+    echo "    xcrun notarytool store-credentials $NOTARY_PROFILE --apple-id <Apple ID> --team-id <TEAMID>"
+    echo "  (암호는 appleid.apple.com 에서 만든 앱 암호)"
+    exit 1; }
+  echo "  ✓ 공증 프로필 '$NOTARY_PROFILE'"
+  export CODESIGN_IDENTITY PTB_REQUIRE_STABLE_SIGN=1   # build-app.sh 방어선: ad-hoc 폴백 차단
 
-  echo "▶ 4/7 버전 범프 $PREV_VERSION → $VERSION (아직 미커밋)"
-  # 두 변수만 고친다 — 파생된 VERSION= 줄을 평평한 리터럴로 덮으면 포크 표기 규칙이 사라진다.
-  perl -pi -e "s/^UPSTREAM_VERSION=\"[^\"]*\"/UPSTREAM_VERSION=\"$TO_UPSTREAM\"/" scripts/build-app.sh
-  perl -pi -e "s/^FORK_BUILD=\"[^\"]*\"/FORK_BUILD=\"$TO_FORK\"/" scripts/build-app.sh
+  RECOVER="복구: git checkout scripts/build-app.sh"
+  echo "▶ 4/9 버전 $CUR_VERSION → $VERSION (아직 미커밋)"
+  perl -pi -e "s/^VERSION=\"[^\"]*\"/VERSION=\"$VERSION\"/" scripts/build-app.sh
 
-  echo "▶ 5/7 빌드 + zip (push 전 검증 — 실패해도 범프 미커밋이라 origin 무손상)"
-  echo "  ⚠ build-app.sh 는 마지막에 실행 중인 앱을 pkill 하고 /Applications 를 교체합니다."
-  ./scripts/build-app.sh >/dev/null || {
-    echo "✗ 빌드 실패 (복구: git checkout scripts/build-app.sh)"; exit 1; }
-  rm -f build/$APP_NAME.zip
-  ditto -c -k --keepParent build/$APP_NAME.app build/$APP_NAME.zip
-  BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" build/$APP_NAME.app/Contents/Info.plist)
-  [[ "$BUILT" == "$VERSION" ]] || { echo "✗ 빌드 버전 불일치: $BUILT (복구: git checkout scripts/build-app.sh)"; exit 1; }
+  echo "▶ 5/9 빌드 + 서명 (설치하지 않음)"
+  PTB_SKIP_INSTALL=1 ./scripts/build-app.sh >/dev/null || { echo "✗ 빌드 실패 ($RECOVER)"; exit 1; }
+  BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist")
+  [[ "$BUILT" == "$VERSION" ]] || { echo "✗ 빌드 버전 불일치: $BUILT ($RECOVER)"; exit 1; }
+  codesign --verify --strict --deep "$APP" || { echo "✗ 서명 검증 실패 ($RECOVER)"; exit 1; }
+  codesign -dv "$APP" 2>&1 | grep -q 'flags=.*runtime' || {
+    echo "✗ hardened runtime 이 꺼져 있습니다 — 공증이 거부됩니다 ($RECOVER)"; exit 1; }
+  echo "  ✓ $APP ($BUILT, hardened runtime)"
 
-  echo "▶ 6/7 커밋 + 태그 + push"
-  git add scripts/build-app.sh
-  git commit -q -m "release: bump fork build to $VERSION"
-  git tag -a "$TAG" -m "PokeTokenBar $VERSION (mobius fork)"
-  git push -q origin "$FORK_BRANCH" "$TAG"
+  echo "▶ 6/9 앱 공증 + staple (수 분 걸릴 수 있음)"
+  rm -f "$ZIP"
+  ditto -c -k --keepParent "$APP" "$ZIP"
+  notarize "$ZIP" || { echo "  ($RECOVER)"; exit 1; }
+  xcrun stapler staple "$APP" >/dev/null || { echo "✗ 앱 staple 실패 ($RECOVER)"; exit 1; }
+  # staple 된 앱으로 zip 을 다시 만든다 — 오프라인에서도 Gatekeeper 가 공증을 확인할 수 있게.
+  rm -f "$ZIP"
+  ditto -c -k --keepParent "$APP" "$ZIP"
+  spctl -a -t exec -vv "$APP" 2>&1 | grep -q 'source=Notarized Developer ID' || {
+    echo "✗ Gatekeeper 가 앱을 공증된 Developer ID 로 인정하지 않습니다 ($RECOVER)"; exit 1; }
+  echo "  ✓ Gatekeeper: Notarized Developer ID"
 
-  echo "▶ 7/7 GitHub Release $TAG ($REPO)"
-  # 설치 안내는 **항상** 앞에 붙인다. 이 자산은 Developer ID 서명이지만 공증(notarization)이
-  # 없어서 다운로드하면 quarantine 이 붙고 Gatekeeper 가 막는다 — 사람이 기억하는 대신
-  # 스크립트가 매번 넣게 한다.
+  echo "▶ 7/9 DMG 생성 + 서명 + 공증 + staple"
+  STAGE=$(mktemp -d)
+  ditto "$APP" "$STAGE/$APP_NAME.app"
+  ln -s /Applications "$STAGE/Applications"
+  rm -f "$DMG"
+  hdiutil create -volname "$VOLUME_NAME" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG" >/dev/null || {
+    rm -rf "$STAGE"; echo "✗ DMG 생성 실패 ($RECOVER)"; exit 1; }
+  rm -rf "$STAGE"
+  codesign --force --timestamp -s "$SIGN_IDENTITY" "$DMG" || { echo "✗ DMG 서명 실패 ($RECOVER)"; exit 1; }
+  notarize "$DMG" || { echo "  ($RECOVER)"; exit 1; }
+  xcrun stapler staple "$DMG" >/dev/null || { echo "✗ DMG staple 실패 ($RECOVER)"; exit 1; }
+  spctl -a -t open --context context:primary-signature -vv "$DMG" 2>&1 | grep -q 'source=Notarized Developer ID' || {
+    echo "✗ Gatekeeper 가 DMG 를 공증된 Developer ID 로 인정하지 않습니다 ($RECOVER)"; exit 1; }
+  echo "  ✓ $DMG (Notarized Developer ID)"
+
+  echo "▶ 8/9 커밋 + 태그 + push"
+  if ! git diff --quiet -- scripts/build-app.sh; then
+    git add scripts/build-app.sh
+    git commit -q -m "release: PokeTokenBar Extended $VERSION"
+  fi
+  git tag -a "$TAG" -m "PokeTokenBar Extended $VERSION"
+  git push -q origin "$RELEASE_BRANCH" "$TAG"
+
+  echo "▶ 9/9 GitHub Release $TAG ($REPO)"
+  # 설치 안내는 **항상** 앞에 붙인다 — 사람이 기억하는 대신 스크립트가 매번 넣게 한다.
   NOTES=$(mktemp)
   cat > "$NOTES" <<NOTE
 ### Install
 
-This build is signed with a Developer ID certificate but is **not notarized**. macOS
-attaches \`com.apple.quarantine\` to anything you download, and Gatekeeper refuses
-unnotarized bundles, so unzip and clear the attribute before installing:
+1. Download **$APP_NAME.dmg** below.
+2. Open it and drag \`$APP_NAME.app\` onto the **Applications** shortcut. Keep it in
+   \`/Applications\` — launch at login and automatic restart after a crash point there.
+3. Open it from Applications. It's a menu-bar app, so look for its icon in the menu bar.
 
-\`\`\`bash
-unzip $APP_NAME.zip
-xattr -d com.apple.quarantine $APP_NAME.app
-cp -R $APP_NAME.app /Applications/
-\`\`\`
+Signed with a Developer ID certificate and **notarized by Apple** — it opens without
+Gatekeeper warnings. \`$APP_NAME.zip\` contains the same app for scripted installs.
 
-### About this build
+To update, replace the app in \`/Applications\` with the new one. Your data in
+\`~/Library/Application Support/PokeTokenBarExtended/\` is kept.
 
-- This is the **mobius fork** (\`$VERSION\`), not upstream PokeTokenBar. It adds
-  Claude/Codex account switching on top of upstream \`$TO_UPSTREAM\`.
-- It shares its bundle id and install path with upstream, so do **not** keep the
-  \`poke-token-bar\` Homebrew cask installed - \`brew upgrade\` would silently replace
-  this build with an upstream one.
-- The in-app update banner tracks **upstream** releases, so it will never offer this
-  release. Take fork updates from this page or by rebuilding from source.
+### About this app
+
+PokeTokenBar Extended is [PokeTokenBar](https://github.com/chattymin/PokeTokenBar) with
+[Mobius](https://github.com/chussum/mobius) Claude/Codex account switching built in. It is a
+separate app from upstream PokeTokenBar (its own bundle id) and is versioned independently,
+starting at 1.0.0. The in-app update banner tracks this repository's releases.
 
 NOTE
   if [[ -n "${PTB_NOTES_FILE:-}" && -f "${PTB_NOTES_FILE}" ]]; then
     printf '### Changes\n\n' >> "$NOTES"
     cat "$PTB_NOTES_FILE" >> "$NOTES"
   fi
-  gh release create "$TAG" build/$APP_NAME.zip --repo "$REPO" \
-    --title "PokeTokenBar $VERSION (mobius fork)" --target "$FORK_BRANCH" \
+  gh release create "$TAG" "$DMG" "$ZIP" --repo "$REPO" \
+    --title "PokeTokenBar Extended $VERSION" --target "$RELEASE_BRANCH" \
     --verify-tag --notes-file "$NOTES" || {
       rm -f "$NOTES"
       echo "✗ 릴리스 생성 실패 — 커밋과 태그는 이미 push 됐습니다."
-      echo "  되돌리기: git push --delete origin $TAG && git tag -d $TAG"
+      echo "  재시도: gh release create $TAG $DMG $ZIP --repo $REPO --verify-tag --notes-file <notes>"
       exit 1; }
   rm -f "$NOTES"
 
-  echo "✓ $VERSION 배포 완료."
-  echo "  설치: 릴리스 페이지에서 zip 을 받아 위 quarantine 해제 후 /Applications 로 복사"
+  echo "✓ $VERSION 배포 완료: https://github.com/$REPO/releases/tag/$TAG"
+  echo "  최신 DMG: https://github.com/$REPO/releases/latest/download/$APP_NAME.dmg"
   exit 0
 fi
 
