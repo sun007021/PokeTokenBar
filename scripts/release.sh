@@ -224,7 +224,7 @@ USAGE
   SIGN_IDENTITY="${CODESIGN_IDENTITY:?CODESIGN_IDENTITY 를 지정하세요 (예: \"Developer ID Application: … (TEAMID)\")}"
   [[ "$SIGN_IDENTITY" == "Developer ID Application:"* ]] || {
     echo "✗ 공증하려면 Developer ID Application 인증서가 필요합니다: '$SIGN_IDENTITY'"; exit 1; }
-  LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" '$0 ~ id {print $2; exit}')
+  LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" 'index($0, id) {print $2; exit}')
   [[ -n "$LEAF" ]] || { echo "✗ 유효 codesigning identity '$SIGN_IDENTITY' 없음(미설치·만료 포함)."; exit 1; }
   LEAF_PIN="scripts/fork-signing-leaf.txt"
   if [[ -f "$LEAF_PIN" ]]; then
@@ -367,7 +367,7 @@ fi
 echo "▶ 코드서명 신원 게이트 (배포 전 — ad-hoc 릴리스 차단으로 사용자 Keychain '항상 허용' 유지)"
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-PokeTokenBar Local}"
 EXPECTED_LEAF="507F814330C727B38AC9A987ECBA929721C52C62"
-LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" '$0 ~ id {print $2; exit}')
+LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" 'index($0, id) {print $2; exit}')
 if [[ -z "$LEAF" ]]; then
   echo "✗ 유효 codesigning identity '$SIGN_IDENTITY' 없음(미설치·만료 포함)."
   echo "  이대로면 build-app.sh 가 ad-hoc 서명 → 이 릴리스로 올린 사용자 전원이 Keychain 을 재승인해야 한다."
