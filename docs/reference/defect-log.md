@@ -432,6 +432,25 @@ read_when:
   새 레이아웃 테스트를 쓸 때: 재려는 뷰가 `Picker(.segmented)`(또는 다른 AppKit 백드 컨트롤)를
   포함하면 측정값이 센티널인지부터 가드하고, 순수 SwiftUI 뷰(`Text`/`HStack`/커스텀 `View`)만 재는
   테스트는 이 문제가 없다는 것도 함께 확인해 둔다.
+- **서명 신원 이름을 셸에서 찾을 때는 정규식이 아니라 리터럴로 매치한다.** `release.sh` 의 leaf 조회가
+  `awk -v id="\"$SIGN_IDENTITY\"" '$0 ~ id'` 였는데, Developer ID 신원 이름에는 항상 `(TEAMID)` 괄호가
+  들어가고 `~` 는 그 괄호를 **정규식 그룹**으로 읽는다 — `"… Sunwook Lee (TYN557Y96W)"` 가
+  `"… Sunwook Lee TYN557Y96W"` 를 찾는 패턴이 되어, `security find-identity` 가 유효하다고 보여 준 신원을
+  "없음(미설치·만료)"으로 판정하고 v1.0.0 릴리스를 3/9 단계에서 멈췄다(아무것도 push 되기 전).
+  **왜 못 걸렀나:** 배포 전 서명 드라이런은 `build-app.sh` 를 직접 돌렸고, 거기는 `grep -F`(리터럴)라
+  통과했다 — **같은 입력을 다른 매치 경로로** 검증해 false confidence 를 줬다. 상류 경로는 괄호 없는
+  `PokeTokenBar Local` 로만 돌았고, 이 저장소의 릴리스 경로는 한 번도 끝까지 돈 적이 없었다.
+  → 두 경로(Extended·상류) 모두 `index($0, id)` 로 바꿨다. 주입 확인: 같은 `find-identity` 출력에서
+  `~` 는 빈 결과, `index()` 는 leaf `208DAA13…` 를 돌려준다. **부류 스윕:** `scripts/`·`.github/` 에서
+  신원 이름을 매치하는 자리는 이 두 줄과 `build-app.sh` 의 `grep -F` 뿐이다. 회귀 가드:
+  `ReleaseScriptTests.testSigningIdentityLookupMatchesTheNameLiterally` — 릴리스 스크립트는 CI 에서
+  끝까지 돌 수 없으므로(인증서·공증 자격 없음) 소스 스캔으로 막는다. (릴리스 중단: 2026-09-15.)
+- **상류에서 넘어온 태그가 이 저장소 버전과 충돌할 수 있다.** 포크는 상류의 `v1.0.0`~`v2.5.x` 태그를
+  그대로 물려받았고, 독자 버전 1.0.0 의 태그가 상류 `v1.0.0`(2026-06-15 상류 커밋)과 겹쳤다.
+  `release.sh` 의 로컬+origin 태그 충돌 검사가 시작 전에 막았다. → origin·로컬에서 상류 사본 `v1.0.0` 만
+  지우고(상류 원본·연결된 릴리스 없음), `git config remote.upstream.tagOpt --no-tags` 로 `git fetch
+  upstream` 이 태그를 다시 끌어오지 않게 했다. 남은 상류 태그는 `v2.0.0` 이상이라 1.x 와 겹치지 않는다
+  — **2.0.0 에 도달하기 전에** 같은 정리가 다시 필요하다.
 
 ## 자격증명·Keychain
 
