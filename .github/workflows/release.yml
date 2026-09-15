@@ -23,7 +23,7 @@ on:
       ref:
         description: 'Tag, branch or SHA to verify'
         required: true
-        default: 'mobius-integration'
+        default: 'main'
 
 # Never cancel a release verification in flight - a half-checked tag is worse than a slow one.
 concurrency:
@@ -46,20 +46,14 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
-      # The tag is the only thing users see that separates a fork build from an upstream
-      # build of the same bundle id, so a tag that disagrees with the version baked into
-      # the bundle is a release-blocking defect, not a cosmetic one.
+      # The in-app update banner compares the release tag against the version baked into
+      # the bundle, so a tag that disagrees with build-app.sh is a release-blocking defect:
+      # users would be offered an update forever, or never.
       - name: Tag matches the version in build-app.sh
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           set -euo pipefail
-          upstream=$(sed -n 's/^UPSTREAM_VERSION="\(.*\)"$/\1/p' scripts/build-app.sh)
-          fork=$(sed -n 's/^FORK_BUILD="\(.*\)"$/\1/p' scripts/build-app.sh)
-          if [ -n "$fork" ]; then
-            version="${upstream}+mobius.${fork}"
-          else
-            version=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' scripts/build-app.sh)
-          fi
+          version=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' scripts/build-app.sh)
           tag_version="${GITHUB_REF_NAME#v}"
           echo "build-app.sh: $version"
           echo "tag:          $tag_version"

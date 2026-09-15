@@ -12,7 +12,11 @@ final class UpdateChecker {
     private(set) var isUpdating = false
 
     let currentVersion: String
-    private let repo = "chattymin/PokeTokenBar"
+    /// 이 앱의 릴리스 저장소. PokeTokenBar Extended 는 상류(chattymin/PokeTokenBar)와 별개로
+    /// 1.0.0 부터 버전을 매기므로(2026-09-15) 상류를 보면 2.x 가 늘 "새 버전"이 되어 배너가
+    /// 상시로 뜬다 — 반드시 이 저장소를 본다.
+    nonisolated static let releaseRepo = "sun007021/PokeTokenBar"
+    private let repo = UpdateChecker.releaseRepo
     private let clock: () -> Date
     private var lastChecked: Date?
 
@@ -53,16 +57,13 @@ final class UpdateChecker {
         available = nil
     }
 
-    /// 이 포크는 **상류 cask 업그레이드 경로를 타지 않는다.**
-    /// `brew upgrade --cask poke-token-bar` 는 확인창 하나 없이 앱을 종료하고 번들을 상류
-    /// 빌드로 교체한다 — 포크와 상류가 같은 번들 ID·같은 설치 경로를 쓰므로 계정 전환 기능이
-    /// 조용히 사라진다. 지금은 사용자가 cask 를 지워 `brewCaskPath()` 가 nil 이지만, 한 번이라도
-    /// 재설치되면 그 경로가 그대로 되살아나므로 코드에서 닫는다.
-    /// 업데이트 **알림은 그대로 받는다**(상류 변경을 놓치지 않기 위한 사용자 결정) — 적용은
-    /// 릴리스 페이지를 여는 것으로 끝나고, 상류로 갈아탈지는 사람이 결정한다. 포크에서
-    /// 올바른 갱신 방법은 `git fetch upstream && git rebase upstream/main` 후 재빌드다
-    /// (docs/reference/mobius-integration.md §상류 rebase).
-    /// 상류 rebase 시 이 한 줄이 포크의 결정 지점이다 — 지우면 덮어쓰기 경로가 돌아온다.
+    /// 이 앱은 **상류 cask 업그레이드 경로를 타지 않는다.**
+    /// `brew upgrade --cask poke-token-bar` 는 확인창 하나 없이 앱을 종료하고 **상류 앱**을
+    /// 설치한다 — 이 앱(PokeTokenBar Extended)의 갱신 수단이 아니다. cask 가 한 번이라도
+    /// 설치돼 있으면 `brewCaskPath()` 가 그 경로를 되살리므로 코드에서 닫는다.
+    /// 업데이트 알림은 이 앱의 저장소(`releaseRepo`) 릴리스만 받고, 적용은 릴리스 페이지를 여는
+    /// 것으로 끝난다(사용자가 DMG 를 받아 교체). 이 한 줄이 결정 지점이다 — 지우면 cask 경로가
+    /// 돌아온다.
     nonisolated static let allowsBrewCaskUpgrade = false
 
     /// 업데이트 적용: brew cask 설치본이면 `brew upgrade` 후 재시작, 아니면 릴리스 페이지.
@@ -104,11 +105,8 @@ final class UpdateChecker {
     /// 버전에서 **우선순위 비교에 쓰이는 숫자 세그먼트만** 뽑는다 — semver 가 우선순위에서
     /// 제외하는 빌드 메타데이터(`+…`)와 프리릴리스(`-…`)를 먼저 잘라낸다.
     ///
-    /// 이 포크(mobius 계정 전환 통합)가 `2.5.3+mobius.1` 을 표시 버전으로 쓰기 때문에 필요하다.
-    /// 그냥 `.` 으로 쪼개면 `"3+mobius"` 가 `Int()` 실패로 0 이 되어 `[2, 5, 0, 1]` 이 되고,
-    /// **이미 나와 있는 상류 2.5.3 이 자기보다 최신으로 보여** 업데이트 배너가 상시로 뜬다.
-    /// 잘라낸 뒤에는 `[2, 5, 3]` 이라 상류 2.5.3 은 동일(배너 없음), 2.5.4 는 새 버전이다 —
-    /// 상류 변경을 계속 알림으로 받겠다는 결정이 이 한 단계에 걸려 있다.
+    /// 그냥 `.` 으로 쪼개면 `"0+local"` 같은 세그먼트가 `Int()` 실패로 0 이 되어, 로컬 빌드
+    /// 표기가 붙은 버전이 같은 릴리스보다 낮거나 높게 판정된다.
     ///
     /// 프리릴리스를 함께 버리는 것은 이 자리에선 안전한 방향이다: 같은 숫자의 `-rc1` 은
     /// "새 버전 아님"이 되고(semver 도 `2.5.3-rc1 < 2.5.3`), GitHub `releases/latest` 는

@@ -4,28 +4,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # ── 버전 (이 저장소의 유일한 정의 지점) ──────────────────────────────────────
-# 이 포크는 상류(chattymin/PokeTokenBar) 위에 mobius 계정 전환을 얹은 것이라, 표시 버전이
-# 상류 기준점과 포크 빌드 번호를 함께 담는다. 상류를 rebase 해 기준점이 올라가면
-# UPSTREAM_VERSION 을 그 버전으로 올리고 FORK_BUILD 를 1 로 되돌린다.
-#
-# CFBundleShortVersionString — 표시(설정창 푸터)·업데이트 비교용. semver 빌드 메타데이터
-#   (`+mobius.N`)를 쓴다: 배너가 "🆕 v2.5.4 available (you have 2.5.3+mobius.1)" 로 나와
-#   지금 돌고 있는 게 포크라는 사실이 결정 시점에 그대로 보인다. `UpdateChecker.isNewer` 는
-#   `+` 앞의 숫자 세그먼트만 비교하므로 상류 2.5.4 는 여전히 새 버전으로 잡힌다(회귀 테스트
-#   `UpdateCheckerTests.testFork*` 가 고정). Apple 규격은 "마침표로 구분된 정수"를 기대하지만
-#   실측(2026-09-12) plutil·codesign --verify --strict·`defaults read`·`PlistBuddy`·
-#   `Bundle.main.object(forInfoDictionaryKey:)` 전부 이 문자열을 그대로 통과시킨다. 규격을
-#   집행하는 곳은 App Store 심사이고 이 포크는 거기로 안 간다.
-#   곁가지: `CodexRateLimitsProvider` 가 이 값을 Codex MCP 핸드셰이크의 `clientInfo.version`
-#   으로 보낸다 — `2.5.3+mobius.1` 은 **유효한 semver**(빌드 메타데이터)이고, 대안이던
-#   `2.5.3.1` 은 semver 가 아니다. 상대가 검증한다면 `+` 쪽이 오히려 안전한 표기다.
-# CFBundleVersion — LaunchServices 가 같은 번들 ID 의 중복 사본 중 무엇을 띄울지 고를 때
-#   비교하는 키다. 여기는 숫자만 유지하고, 네 번째 세그먼트를 포크 빌드 번호로 둬 상류
-#   2.5.3 보다 항상 위에 놓이게 한다.
-UPSTREAM_VERSION="2.5.3"
-FORK_BUILD="1"
-VERSION="$UPSTREAM_VERSION+mobius.$FORK_BUILD"
-BUNDLE_VERSION="$UPSTREAM_VERSION.$FORK_BUILD"
+# PokeTokenBar Extended 는 상류(chattymin/PokeTokenBar)와 **별개로** 1.0.0 부터 버전을
+# 매긴다(사용자 결정 2026-09-15). 개명으로 번들 ID·설치 경로가 갈라져 상류 기준점을 버전에
+# 담아 둘 이유가 사라졌다 — 이전 표기 `2.5.3+mobius.1` 은 은퇴했다.
+# 업데이트 배너는 이 저장소의 릴리스만 본다(`UpdateChecker.releaseRepo`). 상류를 보면 2.x 가
+# 늘 "새 버전"이라 배너가 상시로 뜬다.
+# CFBundleVersion 도 같은 값을 쓴다 — 숫자·마침표뿐이라 LaunchServices 비교에 그대로 맞는다.
+# `release.sh` 가 이 한 줄(`VERSION=`)을 고친다.
+VERSION="1.0.0"
+BUNDLE_VERSION="$VERSION"
 APP_NAME="PokeTokenBarExtended"
 # Finder·메뉴·정보 창에 보이는 표시 이름만 다르게 한다 — CFBundleName(실행파일 이름과 결합돼
 # 위 불변식에 걸림, 15자 제한도 있음)은 그대로 두고 CFBundleDisplayName 만 추가한다.
@@ -94,8 +81,15 @@ echo "==> codesign"
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-PokeTokenBar Local}"
 # 안정적 Keychain ACL 을 위해서는 인증서 존재가 아니라 유효한 codesigning identity 가 필요하다.
 if security find-identity -v -p codesigning | grep -F "\"$SIGN_IDENTITY\"" >/dev/null; then
-    # 안정적 자체 서명 신원 → 재빌드해도 Keychain "항상 허용" 유지
-    codesign --force -s "$SIGN_IDENTITY" "$APP"
+    # 안정적 서명 신원 → 재빌드해도 Keychain "항상 허용" 유지
+    if [[ "$SIGN_IDENTITY" == "Developer ID Application:"* ]]; then
+        # 배포(공증) 가능한 서명. Apple 공증은 hardened runtime(`--options runtime`)과 secure
+        # timestamp 를 요구한다. 이 앱은 JIT·서명 안 된 dylib 로드·Apple Events 를 쓰지 않아
+        # 추가 entitlement 없이 돈다(`security`·`claude`·`codex` 는 별도 프로세스라 무관).
+        codesign --force --options runtime --timestamp -s "$SIGN_IDENTITY" "$APP"
+    else
+        codesign --force -s "$SIGN_IDENTITY" "$APP"
+    fi
 else
     # 인증서 없음 → ad-hoc (빌드마다 cdhash 변경 = Keychain 재프롬프트 가능)
     if [[ "${PTB_REQUIRE_STABLE_SIGN:-0}" == "1" ]]; then
@@ -107,6 +101,13 @@ else
     echo "   ('$SIGN_IDENTITY' 유효 codesigning identity 없음 → ad-hoc 서명 — 로컬 개발용)"
     echo "   반복 Keychain 허용 프롬프트를 줄이려면 ./scripts/create-signing-cert.sh 실행 후 다시 빌드하세요."
     codesign --force -s - "$APP"
+fi
+
+# 릴리스 패키징(release.sh)은 설치 없이 번들만 만든다 — 실행 중인 앱(계정 전환 중일 수
+# 있다)을 죽이고 /Applications 를 갈아끼우는 건 배포 자산을 만드는 일과 무관하다.
+if [[ "${PTB_SKIP_INSTALL:-0}" == "1" ]]; then
+    echo "완료: $APP (설치 건너뜀 — PTB_SKIP_INSTALL=1)"
+    exit 0
 fi
 
 echo "==> 기존 인스턴스 종료 + /Applications 설치"

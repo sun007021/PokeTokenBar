@@ -89,22 +89,26 @@ Pi Agent · omp)을 macOS 메뉴바 속 자라나는 **포켓몬 companion** 으
 
 ## 설치
 
-### 이 저장소의 Releases 에서 (권장)
+### 다운로드 (권장)
 
-이 포크의 [GitHub Releases](https://github.com/sun007021/PokeTokenBar/releases) 에서 zip
-을 받아 압축을 풀고 `PokeTokenBarExtended.app` 을 `/Applications` 로 드래그하세요.
+**[⬇️ PokeTokenBarExtended.dmg 다운로드](https://github.com/sun007021/PokeTokenBar/releases/latest/download/PokeTokenBarExtended.dmg)**
+— 항상 최신 릴리스 · macOS 14+ · Apple silicon
 
-앱은 Developer ID 인증서로 서명돼 있지만 **공증(notarization)은 받지 않았습니다** — 이
-포크의 빌드 과정에는 Apple 의 공증 서비스가 포함돼 있지 않습니다. 즉 브라우저·`curl` 등
-으로 **다운로드한** zip 에는 `com.apple.quarantine` 속성이 붙고, Gatekeeper 가 "Apple 이
-확인할 수 없습니다" 라며 실행을 막습니다. 아래 둘 중 하나로 한 번만 풀어주면 됩니다:
+1. 위 링크에서 DMG 를 받습니다 (이전 버전은
+   [Releases 페이지](https://github.com/sun007021/PokeTokenBar/releases)에 있습니다).
+2. DMG 를 열고 `PokeTokenBarExtended.app` 을 **Applications** 바로가기로 드래그합니다.
+   반드시 `/Applications` 에 두세요 — 로그인 시 실행과 크래시 후 자동 재실행이 그 경로를
+   가리킵니다.
+3. 응용 프로그램 폴더(또는 Spotlight)에서 실행합니다. 메뉴바 앱이라 Dock 이 아니라
+   **메뉴바**에 아이콘이 나타납니다.
 
-- **Finder:** `PokeTokenBarExtended.app` 을 우클릭(또는 Control-클릭) → **열기** → 뜨는 대화상자에서
-  다시 **열기**.
-- **터미널:** `xattr -dr com.apple.quarantine /Applications/PokeTokenBarExtended.app`
+앱은 Developer ID 인증서로 서명되고 **Apple 공증(notarization)** 을 받았으므로 Gatekeeper
+경고 없이 열립니다. 계정 탭이 Claude Code 로그인 정보를 처음 읽을 때 macOS 가 Keychain 접근을
+물을 수 있습니다 — **항상 허용**을 누르세요.
 
-다운로드할 때마다 한 번만 하면 되는 절차이고, 바이너리에 문제가 있다는 신호가 아니라
-Apple 의 (유료·선택) 공증 파이프라인을 거치지 않았다는 뜻일 뿐입니다.
+**업데이트:** 새 버전이 나오면 앱에 업데이트 배너가 뜹니다. 새 DMG 를 받아 `/Applications` 의
+앱을 교체하면 됩니다. 포켓몬·도감·계정 데이터는
+`~/Library/Application Support/PokeTokenBarExtended/` 에 있어 그대로 유지됩니다.
 
 ### 소스에서 빌드
 
@@ -157,10 +161,11 @@ Application Support 디렉터리는 옛 이름에서 이름변경되고, 옛 번
 
 ## 상류 업데이트 가져오기
 
-이 포크는 `git rebase` 로 상류 PokeTokenBar 를 추적합니다 — 상류 릴리스를 그대로
-다운로드해 이 앱을 갱신하는 방식은 쓰지 않습니다(그건 다른 앱입니다). 정확한 rebase 절차·버전 표기 규칙·업데이트 알림
-동작은 [docs/reference/mobius-integration.md](docs/reference/mobius-integration.md) 를
-보세요.
+상류 PokeTokenBar 의 변경은 필요한 것만 골라(merge 또는 cherry-pick) 가져옵니다 — 상류
+릴리스를 설치해 이 앱을 갱신하지 않습니다(그건 다른 앱입니다). PokeTokenBar Extended 는
+상류와 별개로 **1.0.0** 부터 버전을 매기며, 업데이트 배너는 이 저장소의 릴리스만 봅니다.
+절차와 세부 사항은 [docs/reference/mobius-integration.md](docs/reference/mobius-integration.md)
+를 보세요.
 
 ## 라이선스 & 면책
 

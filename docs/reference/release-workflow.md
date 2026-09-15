@@ -4,7 +4,7 @@ read_when:
   - 버전을 배포할 때 (자연어 트리거 포함: "배포해줘", "릴리스 올려줘", "패치 배포")
   - release.sh 가 문서·에셋 경고나 하드 게이트로 중단됐을 때
   - UI 를 바꿔 스크린샷·랜딩을 갱신해야 할 때
-  - mobius 포크(`FORK_BUILD` 가 있는 체크아웃)를 배포할 때 — §포크 릴리스
+  - PokeTokenBar Extended 를 배포할 때(서명·공증·DMG) — §PokeTokenBar Extended 릴리스
 ---
 
 # 릴리스 실행 절차
@@ -52,65 +52,68 @@ PTB_NOTES_FILE=/tmp/ptb-notes.md ./scripts/release.sh <version>
 
 완료 후 `brew upgrade --cask poke-token-bar` 로 실제 업그레이드 동작을 확인한다.
 
-## 포크 릴리스 (mobius — `FORK_BUILD` 가 있는 체크아웃)
+## PokeTokenBar Extended 릴리스 (`APP_NAME="PokeTokenBarExtended"` 인 체크아웃)
 
-위 1~3 절은 **상류**(`chattymin/PokeTokenBar`) 기준이다. 이 포크는 표면이 다르므로
-`release.sh` 가 `scripts/build-app.sh` 의 `FORK_BUILD=` 를 보고 **다른 경로**로 갈라진다.
-(`docs/reference/mobius-integration.md` §`release.sh` 는 이 포크에서 돌지 않는다 는 이 경로가
-생기기 전 기록이다 — 지금은 돈다.)
+위 1~3 절은 **상류**(`chattymin/PokeTokenBar`) 기준이다. 이 저장소는 표면이 다르므로
+`release.sh` 가 `scripts/build-app.sh` 의 `APP_NAME` 을 보고 **다른 경로**로 갈라진다.
+버전은 상류와 별개로 1.0.0 부터 매긴다(`docs/reference/mobius-integration.md` §버전 표기).
 
 ```bash
-# 평소 포크 릴리스: FORK_BUILD 만 +1  (2.5.3+mobius.1 → 2.5.3+mobius.2)
-CODESIGN_IDENTITY="Developer ID Application: … (TEAMID)" \
-  PTB_NOTES_FILE=/tmp/notes.md ./scripts/release.sh
+# 한 번만: 공증 자격을 Keychain 프로필로 저장 (암호 = appleid.apple.com 앱 암호)
+xcrun notarytool store-credentials PokeTokenBarExtended \
+  --apple-id <Apple ID> --team-id TYN557Y96W
 
-# 상류 rebase 로 기준점이 올라갔을 때: UPSTREAM_VERSION 갱신 + FORK_BUILD=1
-CODESIGN_IDENTITY="…" ./scripts/release.sh --upstream 2.5.4
+# 릴리스 (main 브랜치, 깨끗한 작업트리)
+CODESIGN_IDENTITY="Developer ID Application: Sunwook Lee (TYN557Y96W)" \
+  PTB_NOTES_FILE=/tmp/notes.md ./scripts/release.sh patch   # 또는 minor | major | 1.2.0
 ```
 
-검토만: `./scripts/release.sh --check-only` (포크에서는 포크용 체크리스트가 나온다).
+검토만: `./scripts/release.sh --check-only`.
+
+### 단계 (9)
+
+1. `test-gate.sh` 2. 문서 검토(README 의 최신 DMG 링크 존재 포함) 3. 서명·공증 자격 게이트 —
+   Developer ID 필수, `notarytool history` 로 프로필을 **빌드 전에** 확인 4. `VERSION=` 범프(미커밋)
+5. `PTB_SKIP_INSTALL=1 build-app.sh` — 설치·pkill 없이 번들만, hardened runtime 검증
+6. 앱 zip 공증 → `stapler staple` → staple 된 앱으로 zip 재생성 → `spctl` 이 `Notarized Developer ID` 인지
+7. DMG(앱 + `/Applications` 심볼릭 링크) 생성 → 서명 → 공증 → staple → `spctl -t open` 확인
+8. 범프 커밋·주석 태그·push 9. GitHub Release 에 `.dmg` + `.zip`, 설치 안내 노트 자동 첨부
+
+5~7 에서 실패하면 아직 아무것도 push 되지 않았다 — `git checkout scripts/build-app.sh` 로 되돌린다.
 
 ### 상류와 무엇이 다른가
 
-| 단계 | 상류 | 포크 | 왜 |
+| 단계 | 상류 | 이 저장소 | 왜 |
 |---|---|---|---|
-| 브랜치 | `main` | `mobius-integration` (`PTB_RELEASE_BRANCH`) | 포크 작업 브랜치 |
 | 배포 대상 | `chattymin/PokeTokenBar` | `origin` 에서 파생 (`PTB_RELEASE_REPO`) | 하드코딩이면 권한 없는 상류에 쏜다 |
-| 버전 | `VERSION="x.y.z"` 한 줄 | `UPSTREAM_VERSION`+`FORK_BUILD` 두 변수 | §버전 표기 — 평평한 리터럴로 덮으면 포크 표기가 사라진다 |
-| 태그 | `vX.Y.Z` | `vX.Y.Z+mobius.N` | 번들의 `CFBundleShortVersionString` 과 **같은 문자열**. `+` 는 git ref 로 유효함을 확인했다(`git check-ref-format`, 실제 태그 생성·`rev-parse`·`describe` 왕복) |
-| 문서 게이트 | README·assets·랜딩·cask | `mobius-integration.md` 하나 | 상류 표면은 이 포크가 유지하지 않는다(§상류 rebase: "README*.md 는 상류 파일") |
-| Homebrew cask | 버전 갱신 | **단계 없음** | 이 포크엔 tap 이 없고, cask 자체가 금지다 — 같은 번들 ID·같은 경로라 `brew upgrade` 가 포크를 상류 빌드로 덮는다 |
-| 랜딩/Pages | 재빌드 요청 | 없음 | 포크는 랜딩을 유지하지 않는다 |
+| 버전 인자 | `x.y.z` | `x.y.z` 또는 `patch`/`minor`/`major` | CLAUDE.md §릴리스의 세그먼트 단어를 그대로 받는다 |
+| 자산 | zip | **공증된 DMG** + zip | 다운로드한 파일에 quarantine 이 붙어도 Gatekeeper 가 경고 없이 연다 |
+| 태그 충돌 검사 | 로컬 | 로컬 + **origin** | 상류에서 넘어온 `v2.4.5`~`v2.5.x` 태그가 origin 에 남아 있다 |
+| 문서 게이트 | README·assets·랜딩·cask | README.md/ko 의 다운로드 링크 + `mobius-integration.md` | 이 앱은 랜딩·cask·스크린샷 게이트를 유지하지 않는다 |
+| Homebrew cask / Pages | 갱신 | **없음** | tap·랜딩이 없다 |
 | 작업트리 | 검사 없음 | **깨끗해야 시작** | 범프 커밋에 관계없는 스테이징이 딸려 들어가는 것 방지 |
 
 ### 서명·공증 — 자산은 로컬에서만 만든다
 
 릴리스 자산은 **이 머신에서** 만든다. CI 러너에는 인증서가 없어 ad-hoc 서명밖에 못 하는데,
 ad-hoc 은 **리빌드마다 코드 정체성이 바뀌어** 사용자 Keychain 의 "항상 허용"을 매번 리셋한다 —
-계정 전환 기능이 Keychain 을 쓰므로 고정 서명이 사실상 필수다. `release.sh` 의 서명 게이트와
-`PTB_REQUIRE_STABLE_SIGN=1` 이 ad-hoc 폴백을 막는다.
+계정 전환 기능이 Keychain 을 쓰므로 고정 서명이 사실상 필수다.
 
-★ **Developer ID 서명이어도 공증(notarization)은 안 돼 있다.** 로컬 `cp -R` 설치는 quarantine 이
-안 붙어 문제가 없지만(§빌드·설치), **릴리스 zip 은 다운로드되므로 quarantine 이 붙고 Gatekeeper 가
-막는다.** 그래서 `release.sh` 가 릴리스 노트 맨 앞에 `xattr -d com.apple.quarantine` 안내를
-**자동으로** 붙인다 — 사람이 기억할 일로 남기지 않는다.
+- `build-app.sh` 는 신원이 `Developer ID Application:` 이면 `--options runtime --timestamp` 로 서명한다
+  (공증 필수 조건). 이 앱은 JIT·서명 안 된 dylib·Apple Events 를 쓰지 않아 entitlement 가 필요 없다.
+  hardened runtime 여부는 지정 요구사항(DR)을 바꾸지 않으므로 기존 Keychain 승인에 영향이 없다.
+- 공증 판정은 `notarytool submit --wait` 의 종료 코드가 아니라 JSON `status == Accepted` 로 본다.
+  거부되면 스크립트가 `notarytool log <id>` 명령을 출력한다.
+- 앱과 DMG 를 **각각** staple 한다 — DMG 만 staple 하면 DMG 에서 꺼낸 앱은 오프라인에서 공증 확인을
+  못 한다.
 
 ### CI (`.github/workflows/release.yml`)
 
 태그(`v*`) push 에 붙는 **검증 전용** 워크플로다: 릴리스 구성 빌드 + `test-gate.sh` +
-"태그가 `build-app.sh` 의 버전과 일치하는가". 자산은 만들지도 올리지도 않는다(위 서명 이유).
-`build-app.sh` 는 마지막에 `pkill` 하고 `/Applications` 를 교체하는 **설치 스크립트**라
-CI 에서 돌리지 않는다.
-
-- `workflow_dispatch` 는 워크플로 파일이 **저장소 기본 브랜치**에 있어야 UI 에 뜬다.
-  기본 브랜치가 `main` 인 동안에는 태그 트리거만 동작한다(태그 트리거는 태그가 가리키는
-  커밋의 워크플로를 쓰므로 기본 브랜치와 무관하다).
-- `ci.yml` 은 `main` 브랜치/PR 에만 붙어 있어 `mobius-integration` push 에는 **안 돈다.**
-  포크 작업 중 상시 CI 가 필요하면 그 트리거를 넓혀야 한다(상류 공유 파일이라 rebase 충돌
-  면적이 늘어나는 것과 맞바꾼다).
+"태그가 `build-app.sh` 의 `VERSION` 과 일치하는가". 자산은 만들지도 올리지도 않는다(위 서명 이유).
 
 ### 배포 후
 
-인앱 업데이트 배너는 **상류** `releases/latest` 를 본다(`UpdateChecker.repo =
-chattymin/PokeTokenBar`, 의도된 결정). 즉 **포크 릴리스는 배너로 전달되지 않는다** —
-자신이 릴리스 페이지에서 받거나 소스에서 다시 빌드하는 것이 유일한 갱신 경로다.
+인앱 업데이트 배너는 **이 저장소**의 `releases/latest` 를 본다(`UpdateChecker.releaseRepo`).
+README 의 다운로드 링크 `releases/latest/download/PokeTokenBarExtended.dmg` 도 같은 릴리스를 가리킨다 —
+릴리스 직후 그 링크로 DMG 가 받아지는지 확인한다.

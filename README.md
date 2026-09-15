@@ -93,23 +93,26 @@ duplicate that.
 
 ## Install
 
-### From this repo's Releases (recommended)
+### Download (recommended)
 
-Download the zip from this fork's [GitHub Releases](https://github.com/sun007021/PokeTokenBar/releases),
-unzip it, and drag `PokeTokenBarExtended.app` into `/Applications`.
+**[⬇️ Download PokeTokenBarExtended.dmg](https://github.com/sun007021/PokeTokenBar/releases/latest/download/PokeTokenBarExtended.dmg)**
+— always the latest release · macOS 14+ · Apple silicon
 
-The app is signed with a Developer ID certificate, but **it is not notarized** — Apple's
-notarization service isn't part of this fork's build process. That means a zip you
-*download* (browser, `curl`, etc.) gets a `com.apple.quarantine` attribute, and Gatekeeper
-will refuse to open it with an "Apple could not verify..." message. Clear it once, either
-way:
+1. Download the DMG from the link above (older versions are on the
+   [Releases page](https://github.com/sun007021/PokeTokenBar/releases)).
+2. Open it and drag `PokeTokenBarExtended.app` onto the **Applications** shortcut.
+   Keep it in `/Applications` — launch at login and automatic restart after a crash point
+   there.
+3. Open it from Applications (or Spotlight). It's a menu-bar app: look for its icon in the
+   menu bar — there is no Dock icon.
 
-- **Finder:** right-click (or Control-click) `PokeTokenBarExtended.app` → **Open** → **Open**
-  again in the dialog that appears.
-- **Terminal:** `xattr -dr com.apple.quarantine /Applications/PokeTokenBarExtended.app`
+The app is signed with a Developer ID certificate and **notarized by Apple**, so it opens
+without Gatekeeper warnings. When the Accounts tab first reads your Claude Code login,
+macOS may ask for Keychain access — choose **Always Allow**.
 
-This is a one-time step per download — it is not a sign anything is wrong with the
-binary, just that it hasn't been through Apple's (paid, opt-in) notarization pipeline.
+**Updating:** when a new version is released, the app shows an update banner. Download the
+new DMG and replace the app in `/Applications`. Your companion, Pokédex, and accounts live
+in `~/Library/Application Support/PokeTokenBarExtended/` and are kept.
 
 ### Build from source
 
@@ -163,11 +166,12 @@ migration details and what is *not* carried over.
 
 ## Taking upstream updates
 
-This fork tracks upstream PokeTokenBar via `git rebase`, not by downloading upstream's
-releases to update this app (upstream's build is a separate app now — installing it does
-not update this one). See
+Upstream PokeTokenBar changes are brought in selectively (merged or cherry-picked), not by
+installing upstream's releases — upstream's build is a separate app and does not update
+this one. PokeTokenBar Extended is versioned independently of upstream, starting at
+**1.0.0**, and its update banner only tracks this repository's releases. See
 [docs/reference/mobius-integration.md](docs/reference/mobius-integration.md) for the
-exact rebase procedure, version-numbering scheme, and update-notification behavior.
+procedure and details.
 
 ## License & disclaimer
 
