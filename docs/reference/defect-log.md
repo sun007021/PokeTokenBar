@@ -445,6 +445,17 @@ read_when:
   신원 이름을 매치하는 자리는 이 두 줄과 `build-app.sh` 의 `grep -F` 뿐이다. 회귀 가드:
   `ReleaseScriptTests.testSigningIdentityLookupMatchesTheNameLiterally` — 릴리스 스크립트는 CI 에서
   끝까지 돌 수 없으므로(인증서·공증 자격 없음) 소스 스캔으로 막는다. (릴리스 중단: 2026-09-15.)
+- **`set -o pipefail` 스크립트에서 파이프 끝 reader 는 입력을 끝까지 읽어야 한다.** `release.sh` 5/9 단계의
+  `codesign -dv "$APP" 2>&1 | grep -q 'flags=.*runtime'` 가 hardened runtime 이 **켜진**
+  (`flags=0x10000(runtime)`) 앱을 "꺼져 있다"로 판정해 v1.0.0 릴리스를 다시 멈췄다(push 전).
+  `grep -q` 는 첫 매치에서 끝나고, 아직 쓰던 `codesign` 이 SIGPIPE(141)로 죽고, pipefail 이 그 141 을
+  파이프라인 실패로 올린다 — 같은 앱에서 3회 연속 141 로 재현, 출력을 먼저 캡처하면 0.
+  **왜 못 걸렀나:** 드라이런에서 같은 검사를 **대화형 셸(pipefail 없음)** 에서 따로 돌려 통과를 봤다 —
+  스크립트의 셸 옵션이라는 트리거 조건을 빼고 검증했다. 직전 항목의 소스 스캔 테스트도 신원 조회 줄만
+  봤다. **부류 스윕:** `release.sh` 의 `| grep -q` 3곳(runtime·앱 spctl·DMG spctl)과 `| awk '… exit'`
+  3곳(태그 조회·신원 조회 2)을 모두 끝까지 읽는 형태(`grep … >/dev/null`, awk 플래그)로 바꿨다. awk 쪽은
+  출력이 작아 아직 터지지 않았을 뿐 같은 경주다. `build-app.sh`·`test-gate.sh` 에는 해당 패턴이 없다.
+  회귀 가드: `ReleaseScriptTests.testPipelineReadersConsumeAllInputUnderPipefail`(주입해서 빨간불 확인).
 - **상류에서 넘어온 태그가 이 저장소 버전과 충돌할 수 있다.** 포크는 상류의 `v1.0.0`~`v2.5.x` 태그를
   그대로 물려받았고, 독자 버전 1.0.0 의 태그가 상류 `v1.0.0`(2026-06-15 상류 커밋)과 겹쳤다.
   `release.sh` 의 로컬+origin 태그 충돌 검사가 시작 전에 막았다. → origin·로컬에서 상류 사본 `v1.0.0` 만

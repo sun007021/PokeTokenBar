@@ -86,7 +86,7 @@ fork_doc_check() {
   echo "▶ 문서 일관성 검토 (PokeTokenBar Extended)"
   # 상류에서 넘어온 v2.x 태그가 같은 저장소에 섞여 있다 — 이 스크립트가 만든 태그만 고른다
   # (태그 주석에 "PokeTokenBar Extended" 를 넣는다).
-  last_tag=$(git tag -l 'v*' -n1 --sort=-v:refname | awk '/PokeTokenBar Extended/ {print $1; exit}')
+  last_tag=$(git tag -l 'v*' -n1 --sort=-v:refname | awk '/PokeTokenBar Extended/ && !found {print $1; found=1}')
   if [[ -n "$last_tag" ]]; then
     src_changed=$(git diff --name-only "$last_tag"..HEAD -- 'Sources/' 2>/dev/null)
     doc_changed=$(git diff --name-only "$last_tag"..HEAD -- 'docs/reference/mobius-integration.md' 2>/dev/null)
@@ -224,7 +224,7 @@ USAGE
   SIGN_IDENTITY="${CODESIGN_IDENTITY:?CODESIGN_IDENTITY 를 지정하세요 (예: \"Developer ID Application: … (TEAMID)\")}"
   [[ "$SIGN_IDENTITY" == "Developer ID Application:"* ]] || {
     echo "✗ 공증하려면 Developer ID Application 인증서가 필요합니다: '$SIGN_IDENTITY'"; exit 1; }
-  LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" 'index($0, id) {print $2; exit}')
+  LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" 'index($0, id) && !found {print $2; found=1}')
   [[ -n "$LEAF" ]] || { echo "✗ 유효 codesigning identity '$SIGN_IDENTITY' 없음(미설치·만료 포함)."; exit 1; }
   LEAF_PIN="scripts/fork-signing-leaf.txt"
   if [[ -f "$LEAF_PIN" ]]; then
@@ -258,7 +258,9 @@ USAGE
   BUILT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist")
   [[ "$BUILT" == "$VERSION" ]] || { echo "✗ 빌드 버전 불일치: $BUILT ($RECOVER)"; exit 1; }
   codesign --verify --strict --deep "$APP" || { echo "✗ 서명 검증 실패 ($RECOVER)"; exit 1; }
-  codesign -dv "$APP" 2>&1 | grep -q 'flags=.*runtime' || {
+  # 파이프 끝의 reader 는 입력을 끝까지 읽어야 한다(`grep -q`·`awk … exit` 금지). 일찍 끝나면 앞 명령이
+  # SIGPIPE(141)로 죽고 `set -o pipefail` 이 그걸 실패로 올려, 맞는 결과도 실패로 판정된다.
+  codesign -dv "$APP" 2>&1 | grep 'flags=.*runtime' >/dev/null || {
     echo "✗ hardened runtime 이 꺼져 있습니다 — 공증이 거부됩니다 ($RECOVER)"; exit 1; }
   echo "  ✓ $APP ($BUILT, hardened runtime)"
 
@@ -270,7 +272,7 @@ USAGE
   # staple 된 앱으로 zip 을 다시 만든다 — 오프라인에서도 Gatekeeper 가 공증을 확인할 수 있게.
   rm -f "$ZIP"
   ditto -c -k --keepParent "$APP" "$ZIP"
-  spctl -a -t exec -vv "$APP" 2>&1 | grep -q 'source=Notarized Developer ID' || {
+  spctl -a -t exec -vv "$APP" 2>&1 | grep 'source=Notarized Developer ID' >/dev/null || {
     echo "✗ Gatekeeper 가 앱을 공증된 Developer ID 로 인정하지 않습니다 ($RECOVER)"; exit 1; }
   echo "  ✓ Gatekeeper: Notarized Developer ID"
 
@@ -285,7 +287,7 @@ USAGE
   codesign --force --timestamp -s "$SIGN_IDENTITY" "$DMG" || { echo "✗ DMG 서명 실패 ($RECOVER)"; exit 1; }
   notarize "$DMG" || { echo "  ($RECOVER)"; exit 1; }
   xcrun stapler staple "$DMG" >/dev/null || { echo "✗ DMG staple 실패 ($RECOVER)"; exit 1; }
-  spctl -a -t open --context context:primary-signature -vv "$DMG" 2>&1 | grep -q 'source=Notarized Developer ID' || {
+  spctl -a -t open --context context:primary-signature -vv "$DMG" 2>&1 | grep 'source=Notarized Developer ID' >/dev/null || {
     echo "✗ Gatekeeper 가 DMG 를 공증된 Developer ID 로 인정하지 않습니다 ($RECOVER)"; exit 1; }
   echo "  ✓ $DMG (Notarized Developer ID)"
 
@@ -367,7 +369,7 @@ fi
 echo "▶ 코드서명 신원 게이트 (배포 전 — ad-hoc 릴리스 차단으로 사용자 Keychain '항상 허용' 유지)"
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-PokeTokenBar Local}"
 EXPECTED_LEAF="507F814330C727B38AC9A987ECBA929721C52C62"
-LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" 'index($0, id) {print $2; exit}')
+LEAF=$(security find-identity -v -p codesigning | awk -v id="\"$SIGN_IDENTITY\"" 'index($0, id) && !found {print $2; found=1}')
 if [[ -z "$LEAF" ]]; then
   echo "✗ 유효 codesigning identity '$SIGN_IDENTITY' 없음(미설치·만료 포함)."
   echo "  이대로면 build-app.sh 가 ad-hoc 서명 → 이 릴리스로 올린 사용자 전원이 Keychain 을 재승인해야 한다."

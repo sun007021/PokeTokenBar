@@ -30,4 +30,31 @@ final class ReleaseScriptTests: XCTestCase {
                 "release.sh:\(index + 1) should match the identity literally with index($0, id)")
         }
     }
+
+    /// `set -o pipefail` 아래에서 파이프 끝 reader 가 입력을 다 읽기 전에 끝나면(`grep -q`,
+    /// `awk '… exit'`) 앞 명령이 SIGPIPE(141)로 죽고 파이프라인 전체가 실패가 된다 — hardened
+    /// runtime 이 켜진 앱을 "꺼져 있다"로 판정해 v1.0.0 릴리스가 5/9 단계에서 멈춘 원인.
+    func testPipelineReadersConsumeAllInputUnderPipefail() throws {
+        let lines = try releaseScript()
+        XCTAssertTrue(
+            lines.contains { $0.hasPrefix("set -") && $0.contains("pipefail") },
+            "release.sh no longer sets pipefail — revisit whether this guard still applies")
+
+        let earlyExitReader = try NSRegularExpression(
+            pattern: #"\|\s*(grep\s+-[A-Za-z]*q|awk\b.*\bexit\b)"#)
+        var offenders: [String] = []
+        for (index, line) in lines.enumerated() {
+            guard !line.trimmingCharacters(in: .whitespaces).hasPrefix("#") else { continue }
+            let range = NSRange(line.startIndex..., in: line)
+            if earlyExitReader.firstMatch(in: line, range: range) != nil {
+                offenders.append("release.sh:\(index + 1)")
+            }
+        }
+
+        XCTAssertTrue(offenders.isEmpty, """
+            a pipeline reader stops before EOF, so the writer dies with SIGPIPE and pipefail \
+            reports a false failure. Use `grep … >/dev/null` or an awk flag instead of `exit`: \
+            \(offenders.joined(separator: ", "))
+            """)
+    }
 }
